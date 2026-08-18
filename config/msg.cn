@@ -480,7 +480,7 @@ gui_window::main::menu:
     kwic:                     KWIC 索引
     man:                      手册 (PDF)
     mds:                      多维尺度
-    net_cloud:                '***not translated*** Context Cloud // 文脈クラウド'
+    net_cloud:                '上下文词云'
     netg:                     共现网络
     new:                      新建
     noun_phrases:             名词短语
@@ -501,16 +501,12 @@ gui_window::main::menu:
     read:                     导入变量
     run_prep:                 执行预处理
     run_prep_dialog:          |-
-        ***not translated*** Run Pre-Processing now?
-        This may take some time.
+        现在要立即执行预处理吗？
+        这可能需要花费一些时间。
         
-        Note: Pre-Processing extracts and organizes words
-        in preparation for analysis. // 今すぐ前処理を実行してよろしいですか？
-        この処理には時間がかかる場合があります。
-        
-        ※前処理とは分析の準備のために、語を抽出・整理する処理です。
+        注：预处理是为分析做准备，对词语进行提取和整理的处理。
     som:                      自组织图
-    suggest:                  '***not translated*** Show suggest window // サジェスト画面'
+    suggest:                  显示向导画面
     term_vec_mtrx:            提取词×上下文 矩阵表
     text_format:              转换为目标文件
     tf_df:                    TF-DF 绘图
@@ -768,22 +764,17 @@ gui_window::stop_words:
     lang:                     '语言:'
     select_all:               全选
 gui_window::suggest:
-    check_morpho:             |-
-        ***not translated*** Check the Result of
-        Word Extraction // 語の抽出結果を確認
-    codes:                    '***not translated*** Codes // コーディング (C)'
-    codes_new:                '***not translated*** New Coding Rule file // 新規コーディングルール・ファイル'
-    proj_new:                 '***not translated*** New Project // 新規プロジェクト作成'
-    proj_open:                '***not translated*** Open a Project // プロジェクトを開く'
-    proj_tuto:                |-
-        ***not translated*** New Project
-        with Tutorial file // チュートリアル・ファイルで
-        プロジェクト作成
-    proj_tuto_folder:         '***not translated*** Open tutorial Folder // チュートリアル・フォルダを開く'
-    show_on_startup:          '***not translated*** Show on startup // 起動時にサジェスト画面を表示'
-    stands_with_main:         '***not translated*** Follow the main screen // メイン画面に追従する'
-    win_title:                '***not translated*** Suggest - KH Coder // サジェスト - KH Coder'
-    words:                    '***not translated*** Words // 抽出語 (W)'
+    check_morpho:             检查词汇提取结果
+    codes:                    '编码(C)'
+    codes_new:                '新建编码规则'
+    proj_new:                 '新建项目'
+    proj_open:                '打开已有项目'
+    proj_tuto:                '使用教程文件新建项目'
+    proj_tuto_folder:         '打开教程文件夹'
+    show_on_startup:          '启动时显示'
+    stands_with_main:         '追随主画面'
+    win_title:                '向导 - KH Coder'
+    words:                    '词汇(W)'
 gui_window::sysconfig:
     apps:                     外部应用程序
     browse_:                  请打开浏览 ____
