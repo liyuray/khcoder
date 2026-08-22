@@ -423,12 +423,31 @@ sub _fill_in{
 		);
 	}
 
+	# 強制抽出の設定を記憶（変更検出用）
+	$self->{org_mark} = $self->mark_settings;
 }
 
 sub unselect{
 	my $self = shift;
 	$self->hlist->selectionClear();
 	#print "fuck\n";
+}
+
+#----------------------------------#
+#   強制抽出の設定（変更検出用）   #
+#----------------------------------#
+sub mark_settings{
+	my $self = shift;
+
+	my $t = $self->t1->get("1.0","end");
+	$t =~ s/\x0D\x0A|\x0D|\x0A/\n/g;
+
+	return join(
+		"\n",
+		$t,
+		$self->{ff_mark_check_v},
+		$self->{ff_mark_check_v} ? $self->{ff_mark_entry}->get : '',
+	);
 }
 
 #----------------------#
@@ -490,6 +509,16 @@ sub save{
 	}
 
 	$self->config->words_mk(\@mark); # ファイル利用のあとから設定
+
+	# 強制抽出の設定が変更されたか
+	if (
+		   not defined( $self->{org_mark} )
+		or $self->mark_settings ne $self->{org_mark}
+	){
+		$self->{mk_changed} = 1;
+	} else {
+		$self->{mk_changed} = 0;
+	}
 
 	# 使用しない語
 	my @stop; %check = ();
@@ -560,8 +589,11 @@ sub save{
 	$::main_gui->close_all;
 	
 	# Main Windowの表示を更新
-	$::main_gui->inner->refresh;
-	
+	$::main_gui->inner->refresh(-dont_refresh_suggest => 1);
+
+	if ( $self->{mk_changed} ){
+		$::main_gui->menu->mc_morpho_dialog;
+	}
 }
 
 #--------------#
