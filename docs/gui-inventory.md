@@ -12,8 +12,8 @@ change rather than editing this file by hand.
 | Windows in `gui_window/` (top level) | 68 |
 | Modules under `gui_window/` including sub-packages | 150 |
 | Lines of window code | 32,015 |
-| Reachable from a menu entry | 37 |
-| Dialogs / sub-windows opened from another window | 31 |
+| Reachable from a menu entry | 50 |
+| Dialogs / sub-windows opened from another window | 18 |
 | Windows that render an R plot | 16 |
 
 ## Menu tree
@@ -29,8 +29,19 @@ change rather than editing this file by hand.
 | Project > Export |  |
 | Project > Export > Word Frequency List (for Excel) | `word_list` |
 | Project > Export > Document-Word Matrix |  |
+| Project > Export > Document-Word Matrix > CSV File | `morpho_crossout::csv` |
+| Project > Export > Document-Word Matrix > SPSS File | `morpho_crossout::spss` |
+| Project > Export > Document-Word Matrix > Tab Delimited | `morpho_crossout::tab` |
+| Project > Export > Document-Word Matrix > 'Variable-length CSV: for WordMiner' | `morpho_crossout::var` |
 | Project > Export > Document-Code Matrix |  |
+| Project > Export > Document-Code Matrix > CSV File | `cod_out::csv` |
+| Project > Export > Document-Code Matrix > SPSS File | `cod_out::spss` |
+| Project > Export > Document-Code Matrix > Tab Delimited | `cod_out::tab` |
+| Project > Export > Document-Code Matrix > 'Variable-length CSV: for WordMiner' | `cod_out::var` |
 | Project > Export > Word-Context Matrix |  |
+| Project > Export > Word-Context Matrix > CSV File | `contxt_out::csv` |
+| Project > Export > Word-Context Matrix > SPSS File | `contxt_out::spss` |
+| Project > Export > Word-Context Matrix > Tab Delimited | `contxt_out::tab` |
 | Project > Export > Extract Partial Text | `txt_pickup` |
 | Project > Export > Texts in Arbitrary Units | `txt_html2csv` |
 | Project > Export > For KH Coder (*.khc) | `mc_export_project` |
@@ -71,6 +82,10 @@ change rather than editing this file by hand.
 | Tools > Documents > Topic Models > Find Optimal N of Topics | `topic_perplexity` |
 | Tools > Documents > Topic Models > Fit a Topic Model | `topic_fitting` |
 | Tools > Documents > Naive Bayes Classifier |  |
+| Tools > Documents > Naive Bayes Classifier > Build a Model from a Variable | `bayes_learn` |
+| Tools > Documents > Naive Bayes Classifier > Classify Documents using a Model | `bayes_predict` |
+| Tools > Documents > Naive Bayes Classifier > View a Model File | `mc_view_knb` |
+| Tools > Documents > Naive Bayes Classifier > View a Classification Log | `mc_view_nbl` |
 | Tools > Coding |  |
 | Tools > Coding > Frequency | `cod_count` |
 | Tools > Coding > Crosstab | `cod_outtab` |
@@ -84,8 +99,19 @@ change rather than editing this file by hand.
 | Tools > Export |  |
 | Tools > Export > Word Frequency List (for Excel) | `word_list` |
 | Tools > Export > Document-Word Matrix |  |
+| Tools > Export > Document-Word Matrix > CSV File | `morpho_crossout::csv` |
+| Tools > Export > Document-Word Matrix > SPSS File | `morpho_crossout::spss` |
+| Tools > Export > Document-Word Matrix > Tab Delimited | `morpho_crossout::tab` |
+| Tools > Export > Document-Word Matrix > 'Variable-length CSV: for WordMiner' | `morpho_crossout::var` |
 | Tools > Export > Document-Code Matrix |  |
+| Tools > Export > Document-Code Matrix > CSV File | `cod_out::csv` |
+| Tools > Export > Document-Code Matrix > SPSS File | `cod_out::spss` |
+| Tools > Export > Document-Code Matrix > Tab Delimited | `cod_out::tab` |
+| Tools > Export > Document-Code Matrix > 'Variable-length CSV: for WordMiner' | `cod_out::var` |
 | Tools > Export > Word-Context Matrix |  |
+| Tools > Export > Word-Context Matrix > CSV File | `contxt_out::csv` |
+| Tools > Export > Word-Context Matrix > SPSS File | `contxt_out::spss` |
+| Tools > Export > Word-Context Matrix > Tab Delimited | `contxt_out::tab` |
 | Tools > Export > Extract Partial Text | `txt_pickup` |
 | Tools > Export > Texts in Arbitrary Units | `txt_html2csv` |
 | Tools > Export > For KH Coder (*.khc) | `mc_export_project` |
@@ -139,7 +165,7 @@ re-skin.
 | `cod_mds` | 430 | 1 | yes |  | `kh_cod`, `kh_r_plot` | Tools > Coding > Multi-Dimensional Scaling |
 | `cod_cls` | 421 | 1 | yes |  | `kh_cod`, `kh_r_plot` | Tools > Coding > Hierarchical Cluster Analysis |
 | `topic_fitting` | 412 | 2 |  |  | `mysql_crossout` | Tools > Documents > Topic Models > Fit a Topic Model |
-| `bayes_learn` | 394 | 0 |  |  | `kh_nbayes`, `mysql_outvar` | _(sub-window)_ |
+| `bayes_learn` | 394 | 0 |  |  | `kh_nbayes`, `mysql_outvar` | Tools > Documents > Naive Bayes Classifier > Build a Model from a Variable |
 | `contxt_out` | 372 | 0 |  |  | `mysql_crossout` | _(sub-window)_ |
 | `word_conc_opt` | 351 | 0 |  |  | — | _(sub-window)_ |
 | `sql_select` | 339 | 2 |  |  | — | Tools > Execute SQL Statements |
@@ -152,7 +178,7 @@ re-skin.
 | `word_freq` | 259 | 0 | yes |  | `kh_r_plot`, `mysql_words` | Tools > Words > Descriptive Stats > Term Frequency Distribution |
 | `morpho_check` | 256 | 0 |  |  | — | PRe-Processing > Check the Result of Word Extraction |
 | `force_color` | 255 | 4 |  |  | — | _(sub-window)_ |
-| `bayes_predict` | 252 | 0 |  |  | `kh_nbayes`, `mysql_outvar` | _(sub-window)_ |
+| `bayes_predict` | 252 | 0 |  |  | `kh_nbayes`, `mysql_outvar` | Tools > Documents > Naive Bayes Classifier > Classify Documents using a Model |
 | `cod_count` | 242 | 0 |  |  | `kh_cod` | Tools > Coding > Frequency |
 | `about` | 239 | 0 |  |  | — | Help > About |
 | `word_tf_df` | 231 | 1 | yes |  | `kh_r_plot`, `mysql_words` | Tools > Words > Descriptive Stats > TF-DF Plot |

@@ -25,7 +25,7 @@ def label(key, caller='gui_window::main::menu'):
 src = rd('kh_lib/gui_window/main/menu.pm')
 
 # ---- sequential pass over cascade/command calls -----------------------------
-CALL = re.compile(r'(?:my\s+)?(\$\w+)?\s*=?\s*\$(\w+|\{[^}]+\})->(cascade|command)\s*\(')
+CALL = re.compile(r'(?:my\s+)?(\$[\w{}\'>-]+)?\s*=?\s*\$(\w+|\{[^}]+\}|self->\{[^}]+\})->(cascade|command)\s*\(')
 ASSIGN_MSG = re.compile(r"my \$msg = gui_window->gui_jm\(\s*kh_msg->get\('([^']+)'\)")
 
 var_key   = {}        # var -> (parent_var, label_key) at this point in the file
