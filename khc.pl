@@ -59,6 +59,12 @@ use mysql_crossout::r_com;
 use kh_r_plot;
 use mysql_getheader;
 use kh_datacheck;
+use mysql_morpho_check;
+use mysql_nounphrases;
+use mysql_hukugo;
+use kh_dictio;
+use kh_cod::pickup;
+use mysql_getheader;
 use plotR::network;
 use plotR::som;
 require kh_project_io;
@@ -122,7 +128,17 @@ sub _plain {
 			    :                     "$r\n";
 		}
 	} elsif ( ref $d eq 'HASH' ) {
-		printf "%-24s %s\n", "$_:", (defined $d->{$_} ? $d->{$_} : '') for sort keys %$d;
+		for my $k ( sort keys %$d ) {
+			my $v = $d->{$k};
+			if ( ref $v eq 'ARRAY' ) {
+				# Render a nested list inline rather than as a reference.
+				printf "%-24s %s\n", "$k:",
+					join(', ', map { ref $_ eq 'ARRAY' ? join('/', map { $_ // '' } @$_)
+					                                   : ( defined $_ ? $_ : '' ) } @$v);
+			} else {
+				printf "%-24s %s\n", "$k:", (defined $v ? $v : '');
+			}
+		}
 	} else {
 		print defined $d ? "$d\n" : "\n";
 	}
@@ -139,6 +155,16 @@ usage: khc.pl <command> [options]
   prep   --project NAME         run pre-processing (morphological analysis)
   drop   --project NAME         remove a project, its database and working files
   check  --project NAME         check the target text (Pre-Processing menu)
+  check-words --project NAME --query TEXT   how the tagger split a string
+  phrases  --project NAME [--query T]       noun phrases (TermExtract)
+  phrases-detect  --project NAME            run noun-phrase detection
+  compounds --project NAME [--query T]      compound words (ChaSen)
+  compounds-detect --project NAME           run compound detection
+  dict   --project NAME [--pos-on P|--pos-off P]   words selected for analysis
+  pickup --project NAME --rules FILE --out FILE [--code N]
+                                            extract the text a rule matches
+  headings --project NAME --out FILE [--tani h5]   headings for a unit
+  settings                                  current configuration
   archive --project NAME --out FILE.khc          export the whole project
   restore --archive FILE.khc --target FILE       import one back
   stats  --project NAME         the figures shown on the main window
@@ -267,6 +293,35 @@ sub code_matrix {
 	$r .= "d <- subset(d, rowSums(d) > 0)\n";
 	$r .= "# END: DATA\n";
 	return $r;
+}
+
+# The frequency-distribution plots build a small matrix themselves and hand it
+# straight to kh_r_plot, with no window module in between.
+# Emit an R matrix literal named "hoge" from selected columns of a result set,
+# the shape the frequency-distribution windows use.
+sub matrix_r {
+	my ($rows, $cols) = @_;
+	die "khc: no data for this plot\n" unless $rows && @$rows;
+	my $n = scalar @$rows;
+	my $t = 'hoge <- matrix( c(';
+	$t .= join(',', map { my $r = $_; join(',', map { $r->[$_] // 0 } @$cols) } @$rows);
+	$t .= "), nrow=$n, ncol=" . scalar(@$cols) . ", byrow=TRUE)\n";
+	$t .= "# dpi: short based\n";
+	return $t;
+}
+
+sub simple_plot {
+	my (%a) = @_;
+	my $plot = kh_r_plot->new(
+		name      => $a{name},
+		command_f => $a{command},
+		( $a{width}  ? (width  => $a{width})  : () ),
+		( $a{height} ? (height => $a{height}) : () ),
+		font_size => ( $OPT{font_size} // 1 ),
+	) or die "khc: the plot could not be produced\n";
+	$plot->save( $OPT{out} );
+	die "khc: nothing was written to $OPT{out}\n" unless -s $OPT{out};
+	return $plot;
 }
 
 sub word_count {
@@ -732,6 +787,76 @@ my %PLOT = (
 			         standardize_coef => 0, additional_plots => 0, breaks => 0 );
 		},
 	},
+	'cod-som' => {
+		module => 'plotR::som',
+		class  => 'plotR::som',
+		size   => 800,
+		count  => sub { scalar @{ coding_rules('kh_cod::func')->codes } },
+		build  => sub {
+			my $r = code_matrix();
+			return ( r_command => $r, plotwin_name => 'cod_som',
+			         n_nodes => ( $OPT{nodes} // 20 ),
+			         if_cls  => 1,
+			         n_cls   => ( $OPT{clusters} && $OPT{clusters} ne 'auto'
+			                      ? $OPT{clusters} : 3 ),
+			         p_topo  => 'hx',
+			         rlen1   => ( $OPT{rlen1} // 100 ),
+			         rlen2   => ( $OPT{rlen2} // 200 ),
+			         reuse   => 0 );
+		},
+	},
+	# --- frequency distributions: built and drawn here, no window module ---
+	'tf-dist' => {
+		direct => sub {
+			my ($r1, $r2) = mysql_words->freq_of_f;
+			my $m = matrix_r( $r2, [0,3,1] );
+			simple_plot( name => 'words_TF_freq1', command => $m
+				. 'plot(hoge[,1],hoge[,3],type="b",bty="l",lty=1,pch=1,'
+				. 'ylab="frequency", xlab="term frequency")' );
+			return scalar @{ $r2 || [] };
+		},
+	},
+	'df-dist' => {
+		direct => sub {
+			my ($r1, $r2) = mysql_words->freq_of_df( $OPT{tani} );
+			my $m = matrix_r( $r2, [0,3,1] );
+			simple_plot( name => 'words_DF_freq1', command => $m
+				. 'plot(hoge[,1],hoge[,3],type="b",bty="l",lty=1,pch=1,'
+				. 'ylab="frequency", xlab="document frequency")' );
+			return scalar @{ $r2 || [] };
+		},
+	},
+	'tf-df' => {
+		direct => sub {
+			my $h = mysql_exec->select("
+				select num, f, genkei.name
+				from genkei, hselection, df_$OPT{tani}
+				where genkei.khhinshi_id = hselection.khhinshi_id
+				  and genkei.id = df_$OPT{tani}.genkei_id
+				  and genkei.nouse = 0
+				  and hselection.ifuse = 1
+			",1)->hundle;
+			my @rows;
+			while ( my $i = $h->fetch ) { push @rows, [ $i->[0], $i->[1] ] }
+			my $m = matrix_r( \@rows, [0,1] );
+			simple_plot( name => 'words_TF_DF1', command => $m
+				. 'plot(hoge[,1],hoge[,2],bty="l",'
+				. 'ylab="document frequency", xlab="term frequency")' );
+			return scalar @rows;
+		},
+	},
+	'topic-n' => {
+		module => 'gui_window::topic_perplexity',
+		size   => 800,
+		build  => sub {
+			my $r = data_matrix();
+			$r .= "# END: DATA\n";
+			return ( r_command => $r, plotwin_name => 'topic_n_perplexity',
+			         method     => ( $OPT{topic_method} // 'perplexity' ),
+			         fold       => ( $OPT{folds} // 5 ),
+			         candidates => ( $OPT{candidates} // 10 ) );
+		},
+	},
 	mds => {
 		module => 'gui_window::word_mds',
 		size   => 800,
@@ -796,6 +921,123 @@ $CMD{restore} = sub {
 	       db => mysql_exec->db_path( $new->{dbname} ) });
 };
 
+$CMD{'check-words'} = sub {
+	die_usage('--query is required') unless defined $OPT{query} && length $OPT{query};
+	open_project( $OPT{project} );
+	# How a given string was actually split by the tagger.
+	my $r = mysql_morpho_check->search( query => $OPT{query} )
+		or die "khc: no result for that query\n";
+	emit($r);
+};
+
+$CMD{phrases} = sub {
+	open_project( $OPT{project} );
+	# Noun phrases (TermExtract). With no --query the engine returns the
+	# highest scoring ones.
+	die "khc: nothing detected yet -- run 'phrases-detect --project ...' first\n"
+		unless mysql_exec->table_exists('noun_phrases');
+	my $r = mysql_nounphrases->search( query => ( $OPT{query} // '' ) )
+		or die "khc: no results\n";
+	$r = [ @$r[ 0 .. $OPT{limit} - 1 ] ] if @$r > $OPT{limit};
+	emit($r);
+};
+
+$CMD{'phrases-detect'} = sub {
+	open_project( $OPT{project} );
+	mysql_nounphrases->detect;
+	emit({ ok => 1 });
+};
+
+$CMD{compounds} = sub {
+	open_project( $OPT{project} );
+	# Compound words found by ChaSen.
+	die "khc: nothing detected yet -- run 'compounds-detect --project ...' first\n"
+		unless mysql_exec->table_exists('hukugo');
+	my $r = mysql_hukugo->search( query => ( $OPT{query} // '' ) )
+		or die "khc: no results\n";
+	$r = [ @$r[ 0 .. $OPT{limit} - 1 ] ] if @$r > $OPT{limit};
+	emit($r);
+};
+
+$CMD{'compounds-detect'} = sub {
+	open_project( $OPT{project} );
+	mysql_hukugo->run_from_morpho;
+	emit({ ok => 1 });
+};
+
+$CMD{dict} = sub {
+	open_project( $OPT{project} );
+	my $d = kh_dictio->readin or die "khc: could not read the dictionary\n";
+
+	# Toggling a part of speech: --pos-on 名詞 / --pos-off 動詞
+	if ( defined $OPT{'pos-on'} or defined $OPT{'pos-off'} ) {
+		my ($name, $val) = defined $OPT{'pos-on'}
+			? ( $OPT{'pos-on'}, 1 ) : ( $OPT{'pos-off'}, 0 );
+		die "khc: no such part of speech: $name\n"
+			unless exists $d->{usethis}{$name};
+		$d->{usethis}{$name} = $val;
+		$d->save;
+		$d = kh_dictio->readin;
+	}
+
+	emit({
+		pos_in_use => [ grep {  $d->{usethis}{$_} } @{ $d->{hinshilist} || [] } ],
+		pos_off    => [ grep { !$d->{usethis}{$_} } @{ $d->{hinshilist} || [] } ],
+		force_pick => ( $d->words_mk || [] ),
+		stop_words => ( $d->words_st || [] ),
+	});
+};
+
+$CMD{pickup} = sub {
+	die_usage('--rules FILE is required') unless $OPT{rules};
+	die_usage('--out FILE is required') unless $OPT{out};
+	open_project( $OPT{project} );
+
+	# Write out the parts of the text that one coding rule matches.
+	my $cod = coding_rules('kh_cod::pickup');
+	my $codes = $cod->codes or die "khc: the rule file defines no codes\n";
+	my $n = $OPT{code} // 0;
+	die "khc: --code $n is out of range (0.." . $#$codes . ")\n"
+		if $n < 0 || $n > $#$codes;
+
+	$cod->pick(
+		selected => $n,
+		tani     => $OPT{tani},
+		file     => $OPT{out},
+		pick_hi  => ( $OPT{with_headings} ? 1 : 0 ),
+	) or die "khc: nothing matched\n";
+	die "khc: nothing was written to $OPT{out}\n" unless -s $OPT{out};
+	emit({ written => $OPT{out}, code => $codes->[$n]->name,
+	       bytes => -s $OPT{out} });
+};
+
+$CMD{headings} = sub {
+	open_project( $OPT{project} );
+	# The headings that delimit the chosen unit -- what "Texts in Arbitrary
+	# Units" exports alongside the text.
+	die_usage('--out FILE is required') unless $OPT{out};
+	# pic_head picks which heading levels to emit; default to all five.
+	my %levels = map { $_ => 1 } ( $OPT{levels} ? split(/,/, $OPT{levels}) : qw(h1 h2 h3 h4 h5) );
+	mysql_getheader->get_all( file => $OPT{out}, pic_head => \%levels );
+	die "khc: nothing was written to $OPT{out}\n" unless -s $OPT{out};
+	emit({ written => $OPT{out}, bytes => -s $OPT{out} });
+};
+
+$CMD{settings} = sub {
+	# The Project > Settings screen, read-only.
+	my @keys = qw(c_or_j last_lang last_method mecabrc_path mecab_unicode
+	              msg_lang use_hukugo multi_threads r_path private_dir
+	              font_plot font_plot_cn font_plot_kr sqllog);
+	my %out;
+	for my $k (@keys) {
+		next unless $::config_obj->can($k);
+		my $v = eval { $::config_obj->$k };
+		$out{$k} = defined $v ? "$v" : '';
+	}
+	$out{sqlite_version} = mysql_exec->version_number // '';
+	emit(\%out);
+};
+
 $CMD{plot} = sub {
 	die_usage('--out FILE is required') unless $OPT{out};
 	my $kind = $OPT{kind} // 'cls';
@@ -804,6 +1046,15 @@ $CMD{plot} = sub {
 
 	open_project( $OPT{project} );
 	need_r();
+
+	if ( $spec->{direct} ) {
+		$::config_obj->web_if(0);
+		my $n = $spec->{direct}->();
+		emit({ written => $OPT{out}, kind => $kind, words => $n,
+		       bytes => -s $OPT{out} });
+		return;
+	}
+
 	eval "require $spec->{module}; 1" or die "khc: $@";
 
 	# web_if suppresses interactive canvas work, but in plotR::network and
@@ -895,6 +1146,8 @@ GetOptionsFromArray(\@argv, \%OPT,
 	'rules=s', 'tani=s', 'var=s', 'out=s', 'type=s', 'ftype=s', 'sort=s', 'min_doc=i', 'num=s',
 	'kind=s', 'clusters=s', 'dist=s', 'clust=s', 'size=s', 'font_size=f',
 	'mds=s', 'dim=i', 'x=i', 'y=i', 'archive=s', 'edges=i', 'edge_mode=s', 'edge_min=f', 'coef=s', 'plot_index=i', 'nodes=i', 'rlen1=i', 'rlen2=i',
+	'topic_method=s', 'folds=i', 'candidates=i', 'topics=i',
+	'pos-on=s', 'pos-off=s', 'levels=s', 'code=i', 'with_headings',
 	'max=i', 'min=i', 'max_df=i', 'min_df=i',
 ) or die_usage('bad options');
 

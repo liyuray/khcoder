@@ -234,7 +234,8 @@ like( $ex, qr/"rows":[1-9]/, 'word list export reports rows' );
 
 # Plots on one project share config/R-bridge and cannot run concurrently,
 # so these run one at a time.
-for my $kind (qw(cls mds corresp network som cod-cls cod-mds cod-corresp cod-netg)) {
+for my $kind (qw(cls mds corresp network som tf-dist df-dist tf-df
+                 cod-cls cod-mds cod-corresp cod-netg cod-som)) {
     my $png  = "$TMP/khc_test_$kind.png";
     unlink $png if -e $png;
     my @args = ('plot', '--project', $PROJECT, '--kind', $kind,
@@ -277,6 +278,39 @@ if ( $newdb ) {
     is( json_get($rs, 'words'),     6048, 'restored project has all word forms' );
     khc('drop', '--project', $newdb);
 }
+
+#--------------------------------------------------------------------#
+#   preprocessing, dictionary and text extraction                    #
+#--------------------------------------------------------------------#
+
+my $cw = khc('check-words', '--project', $PROJECT, '--query', '先生', '--json');
+like( $cw, qr/先生/, 'check-words shows how the tagger split the string' );
+
+my $dj = khc('dict', '--project', $PROJECT, '--json');
+like( $dj, qr/"pos_in_use":\[/,  'dict lists the parts of speech in use' );
+like( $dj, qr/名詞/,              'nouns are among them' );
+like( $dj, qr/"pos_off":\[/,     'dict lists the ones switched off' );
+
+khc('phrases-detect', '--project', $PROJECT);
+my $ph = khc('phrases', '--project', $PROJECT, '--limit', 5, '--json');
+like( $ph, qr/\[/, 'noun phrases come back after detection' );
+
+my $st = khc('settings', '--json');
+like( $st, qr/"c_or_j":"mecab"/, 'settings reports the analyser' );
+
+SKIP: {
+    unless ( -e $RULES ) { print "# no coding rules; skipping pickup\n"; last SKIP }
+    my $pf = "$TMP/khc_test_pick.txt";
+    unlink $pf if -e $pf;
+    my $pk = khc('pickup', '--project', $PROJECT, '--rules', $RULES,
+                 '--out', $pf, '--code', 0, '--json');
+    like( $pk, qr/"bytes":[1-9]/, 'pickup extracts the text a code matches' );
+}
+
+my $hf = "$TMP/khc_test_head.txt";
+unlink $hf if -e $hf;
+my $hd = khc('headings', '--project', $PROJECT, '--out', $hf, '--json');
+like( $hd, qr/"bytes":[1-9]/, 'headings are exported' );
 
 #--------------------------------------------------------------------#
 
