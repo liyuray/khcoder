@@ -51,6 +51,10 @@ use mysql_getdoc;
 use mysql_ready;
 use mysql_outvar;
 use mysql_outvar::read;   # external-variable readers used when a project is built
+use kh_cod;
+use kh_cod::func;
+use kh_cod::asso;
+use mysql_crossout;
 use kh_morpho;
 use my_threads;
 
@@ -68,7 +72,7 @@ $::config_obj->{R} = 0;
 my_threads->init;
 
 my %OPT = (json => 0, limit => 50, length => 20, column => 0,
-           lang => 'jp', method => 'mecab');
+           lang => 'jp', method => 'mecab', tani => 'bun');
 
 #--------------------------------------------------#
 #   helpers                                        #
@@ -133,6 +137,16 @@ usage: khc.pl <command> [options]
   doc    --project NAME --id N
   sql    --project NAME "SELECT ..."
 
+  vars        --project NAME               list external variables and headings
+  assoc       --project NAME --query WORD   word association
+                [--mode and|or|code] [--sort fr|sa|hi]
+  cod-freq    --project NAME --rules FILE   coding frequency
+  cod-jaccard --project NAME --rules FILE   code similarity matrix
+  cod-crosstab --project NAME --rules FILE --var NAME
+  export      --project NAME --out FILE [--type def|1c|150] [--ftype csv|xls]
+
+  --tani bun|dan|h1..h5         unit of aggregation (default bun)
+
   --json                        machine-readable output
 USAGE
 	exit($m ? 2 : 0);
@@ -150,6 +164,28 @@ sub open_project {
 	kh_project->temp( target => $p->{target}, dbname => $p->{dbname} )->open;
 	return $p;
 }
+
+# Coding rules come from a plain text file; the engine reads and parses it.
+sub coding_rules {
+	my $class = shift;
+	die_usage('--rules FILE is required') unless $OPT{rules};
+	die "khc: no such coding rule file: $OPT{rules}\n" unless -e $OPT{rules};
+	my $obj = $class->read_file( $OPT{rules} )
+		or die "khc: could not read the coding rules: $OPT{rules}\n";
+	return $obj;
+}
+
+# Every part of speech the project is set to use. Both the word list and word
+# association refuse to run with an empty selection, so this is the default the
+# GUI offers.
+sub used_pos {
+	my %pos;
+	my $h = mysql_exec->select("SELECT khhinshi_id FROM hselection WHERE ifuse = 1", 1)->hundle;
+	while ( my $r = $h->fetch ) { $pos{ $r->[0] } = 1 }
+	return \%pos;
+}
+
+sub _num { my $v = shift; return (defined $v && $v =~ /[0-9]/) ? $v + 0 : 0 }
 
 sub one_value {
 	my $sql = shift;
@@ -254,17 +290,12 @@ $CMD{stats} = sub {
 $CMD{words} = sub {
 	open_project( $OPT{project} );
 
-	# Every part of speech the project is set to use, which is what the
-	# Frequency List window offers by default.
-	my %pos;
-	my $h = mysql_exec->select("SELECT khhinshi_id FROM hselection WHERE ifuse = 1", 1)->hundle;
-	while ( my $r = $h->fetch ) { $pos{ $r->[0] } = 1 }
-
+	my $pos = used_pos();
 	mysql_words->search(
 		# mode: p = contains, c = exact, k = ends with, z = starts with.
 		query => ( $OPT{query} // '' ), method => 0, kihon => 0,
 		katuyo => 0, mode => ( $OPT{mode} // 'p' ),
-		filter => { hinshi => \%pos }, hinshi => {},
+		filter => { hinshi => $pos }, hinshi => {},
 	);
 
 	my $rows = mysql_exec->select("
@@ -316,6 +347,106 @@ $CMD{doc} = sub {
 	});
 };
 
+$CMD{vars} = sub {
+	open_project( $OPT{project} );
+	my $rows = mysql_outvar->get_list;
+	emit([ map { { tani => $_->[0], name => $_->[1], id => $_->[2] + 0 } } @{ $rows || [] } ]);
+};
+
+$CMD{'cod-freq'} = sub {
+	open_project( $OPT{project} );
+	my $r = coding_rules('kh_cod::func')->count( $OPT{tani} )
+		or die "khc: coding produced no result\n";
+	# [ name, count, percent ] per code, with a total row appended by the engine.
+	# The engine appends a document-count row whose percent cell is blank.
+	emit([ map { { code    => $_->[0],
+	               n       => _num($_->[1]),
+	               percent => _num($_->[2]) } } @{$r} ]);
+};
+
+$CMD{'cod-jaccard'} = sub {
+	open_project( $OPT{project} );
+	my $r = coding_rules('kh_cod::func')->jaccard( $OPT{tani} )
+		or die "khc: need at least two codes for a similarity matrix\n";
+	emit($r);   # first row is the header
+};
+
+$CMD{'cod-crosstab'} = sub {
+	open_project( $OPT{project} );
+	die_usage('--var is required (see: khc.pl vars)') unless defined $OPT{var};
+
+	# Resolve the variable name to its id.
+	my $id = $OPT{var};
+	unless ( $id =~ /^[0-9]+$/ ) {
+		my ($m) = grep { $_->[1] eq $OPT{var} } @{ mysql_outvar->get_list || [] };
+		die "khc: no such variable: $OPT{var}\n" unless $m;
+		$id = $m->[2];
+	}
+	my $r = coding_rules('kh_cod::func')->outtab( $OPT{tani}, $id, 0 )
+		or die "khc: crosstab produced no result\n";
+	# outtab returns { display, plot, t_rsd }; display is the table the GUI shows.
+	emit( ref $r eq 'HASH' ? ( $r->{display} // $r ) : $r );
+};
+
+$CMD{assoc} = sub {
+	die_usage('--query is required') unless defined $OPT{query} && length $OPT{query};
+	open_project( $OPT{project} );
+
+	# The query goes in as a "direct" code, which lands at index 0; asso() is
+	# then told to use that one code.
+	my $cod = kh_cod::asso->new;
+	$cod->add_direct( mode => ( $OPT{mode} // 'or' ), raw => $OPT{query} );
+	my $ok = $cod->asso(
+		selected => [0],
+		tani     => $OPT{tani},
+		method   => ( $OPT{method} // 'or' ),
+	) or die "khc: word association produced no result\n";
+
+	# order: fr = frequency, sa = difference in proportion, hi = ratio (lift)
+	my $r = $ok->fetch_results(
+		order  => ( $OPT{sort} // 'hi' ),
+		filter => { limit     => $OPT{limit},
+		            min_doc   => ( $OPT{min_doc} // 1 ),
+		            show_lowc => 0,
+		            hinshi    => used_pos() },
+	);
+	emit([ map { { word     => $_->[0],
+	               pos      => $_->[1],
+	               docs     => _num($_->[2]),
+	               global_p => _num($_->[3]),
+	               hits     => _num($_->[4]),
+	               cond_p   => _num($_->[5]),
+	               score    => _num($_->[6]) } } @{ $r || [] } ]);
+};
+
+$CMD{export} = sub {
+	open_project( $OPT{project} );
+	die_usage('--out FILE is required') unless $OPT{out};
+	# word_list_custom dispatches to "_out_file_<ftype>_<type>", and this
+	# snapshot only defines _out_file_xls_150, _out_file_xls and _out_file_csv.
+	# The writer is therefore chosen here rather than by that name.
+	my $type  = $OPT{type}  // 'def';       # def | 1c | 150
+	my $ftype = $OPT{ftype} // 'csv';       # csv | xls
+
+	my $self = bless { type => $type, ftype => $ftype, tani => $OPT{tani},
+	                   num => ( $OPT{num} // 'tf' ) }, 'mysql_words';
+	my $make = "_make_wl_$type";
+	die "khc: unknown --type $type (def, 1c or 150)\n"
+		unless mysql_words->can($make);
+	my $table = $self->$make;
+
+	my $writer = ( $ftype eq 'xls' && $type eq '150' ) ? '_out_file_xls_150'
+	           : ( $ftype eq 'xls' )                   ? '_out_file_xls'
+	           :                                         '_out_file_csv';
+	my $tmp = $self->$writer($table);
+	die "khc: the writer produced nothing\n" unless $tmp && -e $tmp;
+
+	require File::Copy;
+	File::Copy::copy($tmp, $OPT{out})
+		or die "khc: could not write $OPT{out}: $!\n";
+	emit({ written => $OPT{out}, rows => scalar(@{ $table || [] }) });
+};
+
 $CMD{sql} = sub {
 	my $sql = shift;
 	die_usage('a SQL statement is required') unless defined $sql && length $sql;
@@ -341,6 +472,7 @@ GetOptionsFromArray(\@argv, \%OPT,
 	'project=s', 'target=s', 'name=s', 'query=s',
 	'limit=i', 'length=i', 'column=i', 'id=i',
 	'lang=s', 'method=s', 'mode=s', 'json',
+	'rules=s', 'tani=s', 'var=s', 'out=s', 'type=s', 'ftype=s', 'sort=s', 'min_doc=i', 'num=s',
 ) or die_usage('bad options');
 
 eval { $CMD{$cmd}->(@argv); 1 } or do {

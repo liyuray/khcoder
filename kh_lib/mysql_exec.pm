@@ -61,6 +61,14 @@ sub _tune {
 	# "CONVERT(x USING ujis)") so the ordering matches KH Coder 2.x. SQLite has
 	# no CONVERT, so the same key is produced here and sorted with the default
 	# BINARY collation, which compares bytes.
+	# MySQL's TRUNCATE(x, n): cut to n decimals toward zero, not round.
+	$dbh->sqlite_create_function('truncate', 2, sub {
+		my ($x, $n) = @_;
+		return undef unless defined $x;
+		my $f = 10 ** ( $n || 0 );
+		return int( $x * $f ) / $f;
+	});
+
 	$dbh->sqlite_create_function('kh_ujis', 1, sub {
 		my $t = shift;
 		return $t unless defined $t;
@@ -247,10 +255,44 @@ sub _strip_hash_comments {
 	return $out;
 }
 
+
+# MySQL's "/" is real division; SQLite truncates when both operands are
+# integers, which silently turns ratios into 0 and empties result sets. The
+# code base was written against MySQL, so every unquoted division is made real.
+sub _real_division {
+	my $sql = shift;
+	return $sql if index($sql, '/') < 0;
+
+	my $out = '';
+	my $q   = '';
+	my @c   = split //, $sql;
+	for (my $i = 0; $i <= $#c; $i++) {
+		my $ch = $c[$i];
+		if ($q ne '') {
+			$out .= $ch;
+			if ($ch eq "\\" && $i < $#c) { $out .= $c[++$i]; next }
+			$q = '' if $ch eq $q;
+			next;
+		}
+		if ($ch eq "'" || $ch eq '"' || $ch eq '`') { $q = $ch; $out .= $ch; next }
+		# leave /* ... */ comments alone
+		if ($ch eq '/' && $i < $#c && $c[$i+1] eq '*') {
+			$out .= '/*'; $i += 2;
+			$out .= $c[$i++] while $i <= $#c && !($c[$i] eq '*' && $c[$i+1] eq '/');
+			$out .= '*/'; ++$i;
+			next;
+		}
+		if ($ch eq '/') { $out .= '* 1.0 /'; next }
+		$out .= $ch;
+	}
+	return $out;
+}
+
 sub _translate {
 	my $sql = shift;
 
 	$sql = _strip_hash_comments($sql);
+	$sql = _real_division($sql);
 
 	# Storage-engine and table-option clauses have no meaning here.
 	$sql =~ s/\bMAX_ROWS\s*=\s*[0-9]+//ig;

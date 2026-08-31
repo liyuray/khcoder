@@ -178,6 +178,57 @@ like( $idx_gone, qr/\[\[1\]\]/, 'the index is created with a table-prefixed name
 khc('sql', '--project', $PROJECT, 'DROP INDEX IF EXISTS bun_t_probe');
 
 #--------------------------------------------------------------------#
+#   group 1: tabular analyses                                        #
+#--------------------------------------------------------------------#
+
+# Coding needs a rule file; the tutorial's is Shift-JIS, so stage a UTF-8 copy.
+my $RULES = "$TMP/khc_test_theme.txt";
+if ( -e '../tutorial_jp/theme.txt' ) {
+    open(my $in,  '<:encoding(cp932)', '../tutorial_jp/theme.txt') or die;
+    open(my $out, '>:encoding(UTF-8)', $RULES) or die;
+    print {$out} $_ while <$in>;
+    close $in; close $out;
+}
+
+SKIP: {
+    unless ( -e $RULES ) { print "# no coding rules; skipping coding tests\n"; last SKIP }
+
+    my $freq = khc('cod-freq', '--project', $PROJECT, '--rules', $RULES, '--json');
+    like( $freq, qr/"code":"＊人の死"/,  'coding frequency names the codes' );
+    like( $freq, qr/"n":129/,             '人の死 codes 129 sentences' );
+    like( $freq, qr/"n":137/,             '病気 codes 137 sentences' );
+    like( $freq, qr/"n":5064/,            'the total row matches the sentence count' );
+
+    my $jac = khc('cod-jaccard', '--project', $PROJECT, '--rules', $RULES, '--json');
+    like( $jac, qr/1\.000/,               'similarity matrix has a unit diagonal' );
+
+    my $tab = khc('cod-crosstab', '--project', $PROJECT, '--rules', $RULES,
+                  '--var', '部', '--tani', 'h5', '--json');
+    like( $tab, qr/上＿先生と私/,          'crosstab rows are the 部 values' );
+    like( $tab, qr/1215/,                 'crosstab totals the 1,215 sections' );
+}
+
+my $vars = khc('vars', '--project', $PROJECT, '--json');
+like( $vars, qr/"name":"部"/,   'external variables are listed' );
+
+my $as = khc('assoc', '--project', $PROJECT, '--query', '先生',
+             '--limit', 5, '--min_doc', 3, '--json');
+like( $as, qr/"word":"/,  'word association returns words' );
+like( $as, qr/"score":/,  'word association returns a score' );
+
+# The score is a ratio of proportions: it must not be integer-divided to zero.
+like( $as, qr/"score":[1-9]/, 'association scores survive real division' );
+
+my $csv = "$TMP/khc_test_wordlist.csv";
+my $ex  = khc('export', '--project', $PROJECT, '--out', $csv, '--json');
+like( $ex, qr/"rows":[1-9]/, 'word list export reports rows' );
+{
+    ++$ran;
+    if ( -s $csv ) { print "ok $ran - word list export wrote a file\n" }
+    else { ++$failed; print "not ok $ran - word list export wrote a file\n" }
+}
+
+#--------------------------------------------------------------------#
 
 print "\n1..$ran\n";
 print $failed ? "# FAILED $failed of $ran\n" : "# all $ran tests passed\n";
