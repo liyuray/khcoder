@@ -298,8 +298,24 @@ sub _translate {
 	$sql =~ s/\bMAX_ROWS\s*=\s*[0-9]+//ig;
 	$sql =~ s/\b(?:TYPE|ENGINE)\s*=\s*[A-Za-z]+//ig;
 
-	# "varchar(128) binary" -- the binary collation modifier.
-	$sql =~ s/\b(var)?char\s*\(\s*[0-9]+\s*\)\s+binary\b/$1char/ig;
+	# Collation. MySQL's default (utf8mb4_general_ci) compares text
+	# case-INsensitively; SQLite's default BINARY does not. Left alone, an
+	# English corpus would list "The" and "the" as two different words, because
+	# reform() groups by genkei and hinshi.
+	#
+	# So a declared text column gets COLLATE NOCASE to match MySQL, except
+	# where MySQL said "varchar(N) binary" -- a deliberately byte-exact column
+	# (hyoso, the surface form) -- which is marked BINARY first so the pass
+	# below leaves it alone.
+	#
+	# NOCASE folds ASCII only, which is what general_ci did for the Latin
+	# range; Japanese is unaffected either way.
+	if ( $sql =~ /\bCREATE\s+(?:TEMPORARY\s+)?TABLE\b/i ) {
+		$sql =~ s/\b((?:var)?char\s*\(\s*[0-9]+\s*\))\s+binary\b/$1 COLLATE BINARY/ig;
+		$sql =~ s/\b((?:var)?char(?:\s*\(\s*[0-9]+\s*\))?)(?!\s*COLLATE)(?=\s|,|\))/$1 COLLATE NOCASE/ig;
+	} else {
+		$sql =~ s/\b((?:var)?char\s*\(\s*[0-9]+\s*\))\s+binary\b/$1/ig;
+	}
 
 	# RENAME TABLE a TO b  ->  ALTER TABLE a RENAME TO b
 	$sql =~ s/\bRENAME\s+TABLE\s+(\S+)\s+TO\s+(\S+)/ALTER TABLE $1 RENAME TO $2/ig;

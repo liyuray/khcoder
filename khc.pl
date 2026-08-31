@@ -433,7 +433,19 @@ $CMD{drop} = sub {
 
 $CMD{prep} = sub {
 	open_project( $OPT{project} );
-	mysql_ready->first or die "khc: pre-processing failed\n";
+
+	# Pre-processing issues several hundred statements. With AutoCommit each
+	# pays its own WAL commit; one transaction around the lot removes that.
+	# --no-batch turns it off, which is what to use when diagnosing a failure,
+	# since a rollback would otherwise discard the whole run.
+	my $dbh = $::project_obj->dbh;
+	my $batched = !$OPT{'no-batch'};
+	$dbh->begin_work if $batched;
+
+	my $ok = eval { mysql_ready->first };
+	my $err = $@;
+	if ($batched) { $ok && !$err ? $dbh->commit : $dbh->rollback }
+	die "khc: pre-processing failed\n" . ($err // '') unless $ok && !$err;
 	$::project_obj->status_morpho(1);
 	$CMD{stats}->('reopened');
 };
@@ -1220,7 +1232,7 @@ GetOptionsFromArray(\@argv, \%OPT,
 	'kind=s', 'clusters=s', 'dist=s', 'clust=s', 'size=s', 'font_size=f',
 	'mds=s', 'dim=i', 'x=i', 'y=i', 'archive=s', 'edges=i', 'edge_mode=s', 'edge_min=f', 'coef=s', 'plot_index=i', 'nodes=i', 'rlen1=i', 'rlen2=i',
 	'topic_method=s', 'folds=i', 'candidates=i', 'topics=i',
-	'pos-on=s', 'pos-off=s', 'levels=s', 'code=i', 'with_headings',
+	'pos-on=s', 'pos-off=s', 'levels=s', 'code=i', 'with_headings', 'no-batch',
 	'max=i', 'min=i', 'max_df=i', 'min_df=i',
 ) or die_usage('bad options');
 
