@@ -234,7 +234,7 @@ like( $ex, qr/"rows":[1-9]/, 'word list export reports rows' );
 
 # Plots on one project share config/R-bridge and cannot run concurrently,
 # so these run one at a time.
-for my $kind (qw(cls mds corresp network som tf-dist df-dist tf-df
+for my $kind (qw(cls mds corresp network som tf-dist df-dist tf-df doc-cls
                  cod-cls cod-mds cod-corresp cod-netg cod-som)) {
     my $png  = "$TMP/khc_test_$kind.png";
     unlink $png if -e $png;
@@ -316,6 +316,26 @@ my $tp = khc('topics', '--project', $PROJECT, '--topics', 3, '--limit', 4,
              '--min', 40, '--json');
 like( $tp, qr/"topic":1/,  'topic model returns numbered topics' );
 like( $tp, qr/"word":"/,   'each topic lists its strongest words' );
+
+# import-folder: each file in a folder becomes one document.
+my $dir = "$TMP/khc_test_docs";
+mkdir $dir unless -d $dir;
+for my $n (1..3) {
+    open(my $o, '>:encoding(UTF-8)', "$dir/doc$n.txt") or next;
+    print {$o} "これは文書$n です。先生は東京にいた。\n";
+    close $o;
+}
+my $unified = "$TMP/khc_test_unified.txt";
+unlink $unified if -e $unified;
+my $imp = khc('import-folder', '--folder', $dir, '--out', $unified, '--json');
+like( $imp, qr/"files":3/,   'import-folder unifies every file in the folder' );
+like( $imp, qr/"heading":"h5"/, 'each file gets a heading of its own' );
+{
+    ++$ran;
+    my $txt = -e $unified ? do { open(my $i,'<:encoding(UTF-8)',$unified); local $/; <$i> } : '';
+    if ( $txt =~ m{<h5>file:doc1\.txt</h5>} ) { print "ok $ran - the unified file carries file headings\n" }
+    else { ++$failed; print "not ok $ran - the unified file carries file headings\n" }
+}
 
 #--------------------------------------------------------------------#
 

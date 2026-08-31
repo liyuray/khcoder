@@ -58,7 +58,10 @@ use mysql_crossout;
 use mysql_crossout::r_com;
 use kh_r_plot;
 use mysql_getheader;
+use mysql_crossout::csv;
 use kh_datacheck;
+use kh_jchar;
+use File::Find ();
 use mysql_morpho_check;
 use mysql_nounphrases;
 use mysql_hukugo;
@@ -178,6 +181,7 @@ usage: khc.pl <command> [options]
   topics --project NAME [--topics K] [--limit N]   fit an LDA topic model
   archive --project NAME --out FILE.khc          export the whole project
   restore --archive FILE.khc --target FILE       import one back
+  import-folder --folder DIR --out FILE.txt      unify a folder of documents
   stats  --project NAME         the figures shown on the main window
   words  --project NAME [--limit N] [--query TEXT] [--mode p|c|k|z]
   conc   --project NAME --query WORD [--length N]
@@ -880,6 +884,59 @@ my %PLOT = (
 			         candidates => ( $OPT{candidates} // 10 ) );
 		},
 	},
+	'doc-cls' => {
+		module => 'gui_window::doc_cls',
+		# doc_cls reads its matrix from a CSV rather than an inline literal,
+		# and calc_exec builds every plot itself, so it does not fit the
+		# make_plot shape used by the others.
+		custom => sub {
+			my $pos = used_pos();
+			my $csv = $::project_obj->file_TempCSV;
+			mysql_crossout::csv->new(
+				file   => $csv,
+				tani   => $OPT{tani}, tani2 => $OPT{tani},
+				hinshi => [ sort { $a <=> $b } keys %$pos ],
+				max    => ( $OPT{max}    // 0 ), min    => ( $OPT{min}    // 0 ),
+				max_df => ( $OPT{max_df} // 0 ), min_df => ( $OPT{min_df} // 0 ),
+				for_R  => 1,
+			)->run;
+
+			my $path = $::config_obj->uni_path($csv);
+			$path =~ s/\\/\\\\/g;
+			my $r = "d <- read.csv(\"$path\", fileEncoding=\"UTF-8-BOM\")\n";
+			$r .= &gui_window::doc_cls::r_command_fix_d;
+			$r .= "\n# END: DATA\n# UNIT: $OPT{tani}\n";
+
+			my $cluster = &gui_window::doc_cls::calc_exec(
+				r_command      => $r,
+				tani           => $OPT{tani},
+				cluster_number => ( $OPT{clusters} && $OPT{clusters} ne 'auto'
+				                    ? $OPT{clusters} : 5 ),
+				method_dist    => ( $OPT{dist}   // 'euclid' ),
+				method_method  => ( $OPT{clust}  // 'ward' ),
+				method_tfidf   => ( $OPT{tfidf}  // 0 ),
+				method_stand   => ( $OPT{stand}  // 0 ),
+			) or die "khc: the cluster analysis produced no result\n";
+
+			# calc_exec returns itself with {plots}. doc_cls only draws a
+			# dendrogram for 500 documents or fewer (doc_cls.pm:556); above
+			# that the merge-height plot is the only output, which is the
+			# upstream behaviour rather than a failure here.
+			my $which = 'dendrogram';
+			my $plot  = $cluster->{plots}{_dendro};
+			unless ($plot) {
+				$which = 'merge heights';
+				$plot  = $cluster->{plots}{_cluster_tmp}{ $OPT{heights} // 'all' };
+			}
+			die "khc: no plot was produced\n" unless $plot;
+
+			$plot->save( $OPT{out} );
+			die "khc: nothing was written to $OPT{out}\n" unless -s $OPT{out};
+			print STDERR "khc: produced the $which plot\n";
+
+			return one_value("SELECT COUNT(*) FROM $OPT{tani}") // 0;
+		},
+	},
 	mds => {
 		module => 'gui_window::word_mds',
 		size   => 800,
@@ -1123,6 +1180,58 @@ $CMD{topics} = sub {
 	emit(\@out);
 };
 
+$CMD{'import-folder'} = sub {
+	die_usage('--folder DIR is required') unless $OPT{folder};
+	die "khc: no such folder: $OPT{folder}\n" unless -d $OPT{folder};
+	die_usage('--out FILE is required (the unified text to build)')
+		unless $OPT{out};
+
+	# gui_window::import_folder does this from its widgets. The unified file
+	# it writes is the real interface: one heading per source file, then that
+	# file's text, so KH Coder treats each as a document.
+	my $tani = $OPT{tani_tag} // 'h5';
+	open(my $fh, '>:encoding(UTF-8)', $OPT{out})
+		or die "khc: cannot write $OPT{out}: $!\n";
+
+	my @files;
+	my $root = $OPT{folder};
+	$root =~ s{/+$}{};
+
+	File::Find::find({ no_chdir => 1, wanted => sub {
+		my $f = $File::Find::name;
+		return if -d $f;
+		return unless $f =~ /\.(txt|doc|docx|rtf|odt)$/i;
+		return if $f eq $OPT{out};
+
+		my $rel = substr($f, length($root) + 1);
+		$rel =~ s{\\}{/}g;
+		print {$fh} "<$tani>file:$rel</$tani>\n";
+		push @files, $rel;
+
+		my $icode = $OPT{icode} // 'jp_auto';
+		$icode = $icode eq 'jp_auto' ? kh_jchar->check_code2($f)
+		       : $icode eq 'auto'    ? kh_jchar->check_code_all($f)
+		       :                       $icode;
+		if ( open(my $in, "<:encoding($icode)", $f) ) {
+			while ( my $l = <$in> ) {
+				$l =~ tr/<>/  / unless $OPT{keep_tags};
+				print {$fh} $l;
+			}
+			close $in;
+		} else {
+			warn "khc: skipping unreadable file: $f\n";
+		}
+		print {$fh} "\n";
+	}}, $root);
+	close $fh;
+
+	die "khc: no .txt/.doc/.docx/.rtf/.odt files under $root\n" unless @files;
+
+	emit({ unified => $OPT{out}, files => scalar(@files),
+	       bytes => -s $OPT{out}, heading => $tani,
+	       next => "khc.pl new --target $OPT{out} --name <project>" });
+};
+
 $CMD{plot} = sub {
 	die_usage('--out FILE is required') unless $OPT{out};
 	my $kind = $OPT{kind} // 'cls';
@@ -1131,6 +1240,15 @@ $CMD{plot} = sub {
 
 	open_project( $OPT{project} );
 	need_r();
+
+	if ( $spec->{custom} ) {
+		$::config_obj->web_if(0);
+		eval "require $spec->{module}; 1" or die "khc: $@";
+		my $n = $spec->{custom}->();
+		emit({ written => $OPT{out}, kind => $kind, words => $n,
+		       bytes => -s $OPT{out} });
+		return;
+	}
 
 	if ( $spec->{direct} ) {
 		$::config_obj->web_if(0);
@@ -1230,7 +1348,7 @@ GetOptionsFromArray(\@argv, \%OPT,
 	'lang=s', 'method=s', 'mode=s', 'json',
 	'rules=s', 'tani=s', 'var=s', 'out=s', 'type=s', 'ftype=s', 'sort=s', 'min_doc=i', 'num=s',
 	'kind=s', 'clusters=s', 'dist=s', 'clust=s', 'size=s', 'font_size=f',
-	'mds=s', 'dim=i', 'x=i', 'y=i', 'archive=s', 'edges=i', 'edge_mode=s', 'edge_min=f', 'coef=s', 'plot_index=i', 'nodes=i', 'rlen1=i', 'rlen2=i',
+	'mds=s', 'dim=i', 'x=i', 'y=i', 'tfidf=i', 'stand=i', 'heights=s', 'folder=s', 'tani_tag=s', 'icode=s', 'keep_tags', 'archive=s', 'edges=i', 'edge_mode=s', 'edge_min=f', 'coef=s', 'plot_index=i', 'nodes=i', 'rlen1=i', 'rlen2=i',
 	'topic_method=s', 'folds=i', 'candidates=i', 'topics=i',
 	'pos-on=s', 'pos-off=s', 'levels=s', 'code=i', 'with_headings', 'no-batch',
 	'max=i', 'min=i', 'max_df=i', 'min_df=i',
