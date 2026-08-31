@@ -150,7 +150,7 @@ sub load{
 			$lang = 'jp' if $locale =~ /ja_JP\./;
 		}
 		$::config_obj->msg_lang($lang);
-		print "Locale: $locale\n";
+		print "Locale: $locale\n" unless $::config_obj && $::config_obj->web_if;
 	}
 
 	my $file =

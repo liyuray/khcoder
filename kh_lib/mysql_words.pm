@@ -183,7 +183,7 @@ sub search_hits{
 sub conv_query{
 	my $self = shift;
 	my $q = shift;
-	$q =~ s/'/\\'/go;
+	$q =~ s/'/''/go;
 	
 	if ($self->{mode} eq 'p'){
 		$q = '\'%'."$q".'%\'';

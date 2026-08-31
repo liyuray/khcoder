@@ -7,3 +7,5 @@ config/sql.log
 config/R-bridge/
 config/khc*/
 kh_lib/Tk/si_*100.png
+docs/__pycache__/
+config/projects_trush
