@@ -438,18 +438,15 @@ $CMD{drop} = sub {
 $CMD{prep} = sub {
 	open_project( $OPT{project} );
 
-	# Pre-processing issues several hundred statements. With AutoCommit each
-	# pays its own WAL commit; one transaction around the lot removes that.
-	# --no-batch turns it off, which is what to use when diagnosing a failure,
-	# since a rollback would otherwise discard the whole run.
-	my $dbh = $::project_obj->dbh;
-	my $batched = !$OPT{'no-batch'};
-	$dbh->begin_work if $batched;
-
-	my $ok = eval { mysql_ready->first };
-	my $err = $@;
-	if ($batched) { $ok && !$err ? $dbh->commit : $dbh->rollback }
-	die "khc: pre-processing failed\n" . ($err // '') unless $ok && !$err;
+	# No outer transaction here. Wrapping the pipeline in one looks appealing,
+	# but it cannot work: mysql_exec::_load_file runs its own begin_work and
+	# commit for the bulk load, and that inner commit ends the outer
+	# transaction, leaving the rest of the run unbatched and the final commit
+	# warning "commit ineffective with AutoCommit enabled". It was also worth
+	# nothing when measured -- 62.87s unbatched against 63.25s batched on a
+	# 4.9MB corpus -- because WAL with synchronous=NORMAL already avoids an
+	# fsync per commit.
+	mysql_ready->first or die "khc: pre-processing failed\n";
 	$::project_obj->status_morpho(1);
 	$CMD{stats}->('reopened');
 };
@@ -1350,7 +1347,7 @@ GetOptionsFromArray(\@argv, \%OPT,
 	'kind=s', 'clusters=s', 'dist=s', 'clust=s', 'size=s', 'font_size=f',
 	'mds=s', 'dim=i', 'x=i', 'y=i', 'tfidf=i', 'stand=i', 'heights=s', 'folder=s', 'tani_tag=s', 'icode=s', 'keep_tags', 'archive=s', 'edges=i', 'edge_mode=s', 'edge_min=f', 'coef=s', 'plot_index=i', 'nodes=i', 'rlen1=i', 'rlen2=i',
 	'topic_method=s', 'folds=i', 'candidates=i', 'topics=i',
-	'pos-on=s', 'pos-off=s', 'levels=s', 'code=i', 'with_headings', 'no-batch',
+	'pos-on=s', 'pos-off=s', 'levels=s', 'code=i', 'with_headings',
 	'max=i', 'min=i', 'max_df=i', 'min_df=i',
 ) or die_usage('bad options');
 
