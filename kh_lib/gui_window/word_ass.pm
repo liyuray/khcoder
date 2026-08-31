@@ -639,7 +639,7 @@ sub net_calc{
 	mysql_exec->do("
 		create temporary table tmp_words_4net (
 			genkei_id int primary key not null
-		) TYPE=HEAP
+		)
 	",1);
 
 	my $sql_w = "INSERT INTO tmp_words_4net (genkei_id) VALUES ";

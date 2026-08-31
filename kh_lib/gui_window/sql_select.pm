@@ -88,9 +88,9 @@ sub _new{
 	$e->insert(0,'1000');
 
 
-	my $server = 'MySQL '
-		.mysql_exec->select("show variables like \"version\"")
-		->hundle->fetch->[1];
+	my $server = 'SQLite '
+		.mysql_exec->select("select sqlite_version()")
+		->hundle->fetch->[0];
 
 	$lf->Label(
 		-text => 

@@ -238,7 +238,7 @@ sub outtab{
 	$self->cumulate if @{$self->{valid_codes}} > 29;
 	
 	# 外部変数のチェック
-	my $heap = 'TYPE=HEAP';
+	my $heap = '';
 	$heap = '' unless $::config_obj->use_heap;
 	my ($outvar_tbl,$outvar_clm);
 	my $var_obj = mysql_outvar::a_var->new(undef,$var_id);

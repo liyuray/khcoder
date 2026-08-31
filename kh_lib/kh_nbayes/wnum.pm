@@ -13,7 +13,7 @@ sub _get_wnum{
 	mysql_exec->do("create temporary table genkei_in_use
 		(
 			genkei_id int primary key not null
-		) TYPE = HEAP
+		)
 	",1);
 
 	my $sql = "
@@ -61,7 +61,7 @@ sub _get_wnum{
 	mysql_exec->do("create temporary table doc_in_use
 		(
 			id int primary key not null
-		) TYPE = HEAP
+		)
 	",1);
 
 	$sql = '';

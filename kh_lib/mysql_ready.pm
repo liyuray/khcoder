@@ -47,7 +47,7 @@ sub first{
 	}
 	
 	if ($::config_obj->use_heap) {
-		# $self->{type_heap} = ' TYPE=HEAP ';
+		# $self->{type_heap} = '';
 		$self->{type_heap} = '';        # 安全第一 / heapではなくmyisamで
 	} else {
 		$self->{type_heap} = '';
@@ -529,11 +529,10 @@ sub zero_length_headings{
 	
 	# delete from "bun" table
 	mysql_exec->do("
-		DELETE
-		FROM bun
-		USING bun, bun_length_nouse
-		WHERE bun.id = bun_length_nouse.id
-			AND bun_length_nouse.len = 0;
+		DELETE FROM bun
+		WHERE id IN (
+			SELECT id FROM bun_length_nouse WHERE len = 0
+		)
 	",1);
 
 	# Counts of document length will be broken here and there,
@@ -558,7 +557,7 @@ sub zero_length_headings{
 		  h3_id  int not null,
 		  h2_id  int not null,
 		  h1_id  int not null,
-		  seq int auto_increment not null UNIQUE
+		  seq int
 		)
 	",1);
 	mysql_exec->do("
@@ -567,7 +566,11 @@ sub zero_length_headings{
 		FROM bun
 		ORDER BY id
 	",1);
-	mysql_exec->do("alter table bun_tmp CHANGE COLUMN seq seq int not null",1);
+	# seq is a dense 1..N ordering of the sentences, used for next/previous
+	# document navigation. MySQL got it from AUTO_INCREMENT; here the rows were
+	# just inserted in id order into a fresh table whose "int primary key" is not
+	# a rowid alias, so rowid is exactly that dense sequence.
+	mysql_exec->do("UPDATE bun_tmp SET seq = rowid",1);
 	mysql_exec->do("drop table if exists bun",1);
 	mysql_exec->do("RENAME TABLE bun_tmp TO bun",1);
 
@@ -1288,8 +1291,8 @@ sub hyosobun{
 		SELECT hyoso.name, hyoso.id
 		FROM hyoso
 		WHERE
-			   (( name RLIKE '<[Hh][1-5]\>' ) AND ( len = 4 ))
-			OR (( name RLIKE '</[Hh][1-5]>' ) AND ( len = 5 ))
+			   (( name GLOB '<[Hh][1-5]>' ) AND ( len = 4 ))
+			OR (( name GLOB '</[Hh][1-5]>' ) AND ( len = 5 ))
 			OR ( name = '。' )
 	",1)->hundle;
 	my ($IDs, $IDsR);
@@ -1625,7 +1628,7 @@ sub tag_fix{
 			AND genkei.khhinshi_id = hselection.khhinshi_id
 			AND (
 				   hselection.name = \'タグ\'
-				|| hselection.name = \'TAG\'
+				OR hselection.name = \'TAG\'
 			)
 	",1)->hundle;
 	while (my $i = $h->fetch){
@@ -1650,7 +1653,7 @@ sub tag_fix{
 			    genkei.khhinshi_id = hselection.khhinshi_id
 			AND (
 				   hselection.name = \'タグ\'
-				|| hselection.name = \'TAG\'
+				OR hselection.name = \'TAG\'
 			)
 	",1)->hundle;
 	while (my $i = $k->fetch){
@@ -1672,7 +1675,7 @@ sub tag_fix{
 	#		    genkei_fin.khhinshi_id = hselection.khhinshi_id
 	#		AND (
 	#			   hselection.name = \'タグ\'
-	#			|| hselection.name = \'TAG\'
+	#			OR hselection.name = \'TAG\'
 	#		)
 	#",1)->hundle;
 	#while (my $i = $k->fetch){

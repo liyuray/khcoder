@@ -121,17 +121,17 @@ sub make_tani_id_col{
 	my $count;
 	my @tani_order = ("h1","h2","h3","h4","h5","dan","bun");
 	$outvar_tani_index = 8;
-	$tani_col_str = "CONCAT(";
+	$tani_col_str = "(";
 	foreach my $tani_str (@tani_ary) {
 		if($count) {
-			$tani_col_str .= ", ";
+			$tani_col_str .= " || ";
 		}
 		if ($tani_str eq "bun") {
-			$tani_col_str .= "'".$tani_str.":', hyosobun.bun_idt, '\@'";
+			$tani_col_str .= "'".$tani_str.":' || hyosobun.bun_idt || '\@'";
 		} elsif ($dan_disuse_flg && $tani_str eq "dan") {
-			$tani_col_str .= "'".$tani_str.":', hyosobun.".$h_min_tani."_id, '\@'";
+			$tani_col_str .= "'".$tani_str.":' || hyosobun.".$h_min_tani."_id || '\@'";
 		} else {
-			$tani_col_str .= "'".$tani_str.":', hyosobun.".$tani_str."_id, '\@'";
+			$tani_col_str .= "'".$tani_str.":' || hyosobun.".$tani_str."_id || '\@'";
 		}
 		$count++;
 		my ($index) = grep { $tani_order[$_] eq 'h5' } 0 .. $#tani_order;
@@ -490,7 +490,7 @@ sub output_KWIC_files{
 				hyosobun_id int,
 				part_id int,
 				tani_id_string varchar(30)
-			) TYPE = HEAP
+			)
 		",1);
 		mysql_exec->do("ALTER TABLE temp_conc_multi ADD INDEX index1 (genkei_id)",1);
 		mysql_exec->do("ALTER TABLE temp_conc_multi ADD INDEX index2 (hyosobun_id)",1);
@@ -499,7 +499,7 @@ sub output_KWIC_files{
 		mysql_exec->do("
 			create table temp_part (
 				id int primary key
-			) TYPE = HEAP
+			)
 		",1);
 	}
 	if (mysql_exec->table_exists("temp_conc_multi_sort")) {
@@ -532,7 +532,7 @@ sub output_KWIC_files{
 				r4_count int,
 				r5_count int,
 				genkei_id int
-			) TYPE = HEAP
+			)
 		",1);
 	}
 	

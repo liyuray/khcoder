@@ -231,7 +231,7 @@ sub ready{
 	# AND検索による絞り込みを実施
 	mysql_exec->drop_table("ct_tmp_phrase");
 	mysql_exec->do("
-		CREATE TEMPORARY TABLE ct_tmp_phrase (id int) TYPE=HEAP
+		CREATE TEMPORARY TABLE ct_tmp_phrase (id int)
 	",1);
 	my $sql = '';
 	$sql .= "INSERT INTO ct_tmp_phrase (id)\n";

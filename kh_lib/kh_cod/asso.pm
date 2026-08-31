@@ -189,7 +189,7 @@ sub asso{
 	mysql_exec->do("
 		create temporary table temp_word_ass(
 			id int not null primary key
-		) TYPE=HEAP
+		)
 	",1);
 
 	my $sql;                                    # リストをテーブルに投入
@@ -291,7 +291,7 @@ sub asso{
 		CREATE TEMPORARY TABLE ct_ass_p(
 			genkei_id INT primary key,
 			p         INT
-		) TYPE=HEAP
+		)
 	",1);
 	$sql = "INSERT INTO ct_ass_p (genkei_id, p)\n";
 	$sql .= "SELECT genkei.id, COUNT(DISTINCT $tani.id)\n";

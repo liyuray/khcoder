@@ -70,7 +70,7 @@ sub search{
 		foreach my $i (keys %{$self->{filter}{hinshi}}){
 			if ($self->{filter}{hinshi}{$i}){
 				$sql .= "\t\t";
-				$sql .= "|| " if $n;
+				$sql .= "OR " if $n;
 				$sql .= "genkei.khhinshi_id = $i\n";
 				++$n;
 			}

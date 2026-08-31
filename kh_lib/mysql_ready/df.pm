@@ -63,7 +63,7 @@ sub calc{
 	foreach my $tani (@avail){
 		my $heap = '';
 		if ( $::config_obj->use_heap && $self->{use_heap_act} ){
-			$heap = 'TYPE=HEAP';
+			$heap = '';
 			print " df: heap ";
 		}
 		

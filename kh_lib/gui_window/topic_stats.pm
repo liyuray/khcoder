@@ -361,7 +361,7 @@ sub _calc{
 
 	} else {                                      #### Variables
 		# check the selected variable
-		my $heap = 'TYPE=HEAP';
+		my $heap = '';
 		$heap = '' unless $::config_obj->use_heap;
 		my ($outvar_tbl,$outvar_clm);
 		my $var_obj = mysql_outvar::a_var->new(undef,$self->var_id);

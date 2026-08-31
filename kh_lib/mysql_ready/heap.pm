@@ -7,6 +7,11 @@ sub rowdata{
 	my $class = shift;
 	my $self = shift;
 
+	# SQLite has no separate in-memory table engine, so the HEAP variant of
+	# rowdata would be byte-for-byte the same table reached by a slower path.
+	$self->{use_heap_act} = 0;
+	return $self;
+
 	my $sizeof_char = 8; # It should be "4" on 32bit systems
 	my $a_row = 0;
 
@@ -51,7 +56,7 @@ sub rowdata{
 			genkei varchar(".$self->length('genkei').") not null,
 			hinshi varchar(".$self->length('hinshi').") not null,
 			katuyo varchar(".$self->length('katuyo').") not null
-		) TYPE=HEAP
+		)
 	",1);
 
 	mysql_exec->do("
@@ -91,7 +96,7 @@ sub hyosobun{
 			dan_id INT not null,
 			bun_id INT not null,
 			bun_idt INT not null
-		) TYPE=HEAP
+		)
 	",1);
 	mysql_exec->do("
 		INSERT INTO hyosobun (id,hyoso_id,h1_id,h2_id,h3_id,h4_id,h5_id,dan_id,bun_id,bun_idt)

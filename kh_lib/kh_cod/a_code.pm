@@ -143,7 +143,7 @@ sub code{
 		CREATE TABLE $self->{res_table} (
 			id int not null primary key,
 			num float
-		) type = heap
+		)
 	",1);
 	mysql_exec->do("
 		INSERT INTO $self->{res_table} (id, num)
@@ -277,7 +277,7 @@ sub ready{
 			$sql .= "$col FLOAT,"
 		}
 		chop $sql;
-		$sql .= ') TYPE = HEAP ';
+		$sql .= ') ';
 		mysql_exec->do($sql,1);
 		push @{$self->{tables}}, "ct_$tani"."_$n";
 		

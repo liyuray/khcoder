@@ -108,7 +108,7 @@ sub ready{
 	mysql_exec->do("
 		CREATE TEMPORARY TABLE ct_tmp_midashi (
 			$temp_c
-		) TYPE=HEAP
+		)
 	",1);
 	mysql_exec->do("
 		INSERT INTO ct_tmp_midashi ($temp_s)

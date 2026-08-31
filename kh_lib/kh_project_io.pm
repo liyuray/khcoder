@@ -1,7 +1,7 @@
 package kh_project_io;
 
 use strict;
-use MySQL::Backup_kh;
+use File::Copy qw(copy);
 use MIME::Base64;
 use YAML qw(DumpFile LoadFile);
 use Archive::Zip qw( :ERROR_CODES );
@@ -9,20 +9,17 @@ use Archive::Zip qw( :ERROR_CODES );
 sub export{
 	my $savefile = $_[0];
 
-	my $mb = new_from_DBH MySQL::Backup_kh($::project_obj->dbh);
-
 	# MySQLのデータを格納
+	# The database is a single file, so the export is a copy of it rather
+	# than a SQL dump. Checkpoint first so the WAL is folded back in.
 	my $file_temp_mysql = $::config_obj->file_temp;
-	open (MYSQLO,'>:encoding(utf8)', $file_temp_mysql) or
+	$::project_obj->dbh->do("PRAGMA wal_checkpoint(TRUNCATE)");
+	copy( mysql_exec->db_path( $::project_obj->dbname ), $file_temp_mysql ) or
 		gui_errormsg->open(
 			type => 'file',
 			file => $file_temp_mysql
 		)
 	;
-	$mb->create_structure(*MYSQLO);
-	$mb->data_backup(*MYSQLO);
-	$mb->create_index_structure(*MYSQLO);
-	close (MYSQLO);
 
 	# MySQL::Backupはいろいろと修正する必要があった
 	#   1. バックアップの挙動を、一行ずつの出力に変更       → OK
@@ -63,7 +60,7 @@ sub export{
 	# Zipファイルに固める
 	my $zip = Archive::Zip->new();
 	
-	$zip->addFile( $file_temp_mysql, 'mysql' );
+	$zip->addFile( $file_temp_mysql, 'sqlite' );
 	$zip->addFile( $file_temp_info,  'info' );
 	
 	if ( -e $::project_obj->status_source_file ){
@@ -173,12 +170,25 @@ sub import{
 
 	# MySQLデータベースの復帰
 	my $file_temp_mysql = $::config_obj->file_temp;
-	unless ( $zip->extractMember('mysql',$file_temp_mysql) == AZ_OK ){
+	unless ( $zip->extractMember('sqlite',$file_temp_mysql) == AZ_OK ){
+		print "Could not extract the database. Archives written by a\n"
+			."MySQL-backed KH Coder cannot be read by this build.\n";
 		return undef;
 	}
-	my $mb = new_from_DBH MySQL::Backup_kh($::project_obj->dbh);
-	$mb->run_restore_script($file_temp_mysql);
+	# Swap the freshly created empty database for the exported one.
+	my $db_path = mysql_exec->db_path( $::project_obj->dbname );
+	$::project_obj->dbh->disconnect;
+	foreach my $f ($db_path, "$db_path-wal", "$db_path-shm") {
+		unlink($f) if -e $f;
+	}
+	copy($file_temp_mysql, $db_path) or
+		gui_errormsg->open(
+			type => 'file',
+			file => $db_path
+		)
+	;
 	unlink($file_temp_mysql);
+	$::project_obj->{dbh} = mysql_exec->connect_db( $::project_obj->dbname );
 
 	# save some info into MySQL status_char table
 	mysql_exec->do("DELETE FROM status_char WHERE name = 'copied_file'");

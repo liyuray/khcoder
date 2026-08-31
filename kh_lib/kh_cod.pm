@@ -168,7 +168,7 @@ sub _cumulate{
 	}
 	chop $sql; chop $sql; $sql .= "\n";
 	chop $col_list;
-	$sql .= ") type = heap";
+	$sql .= ")";
 	mysql_exec->do("$sql",1);
 	
 	# Insert

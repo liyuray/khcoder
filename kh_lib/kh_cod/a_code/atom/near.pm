@@ -229,7 +229,7 @@ sub ready{
 	# AND検索による絞り込み
 	mysql_exec->drop_table("ct_tmp_near");
 	mysql_exec->do("
-		CREATE TEMPORARY TABLE ct_tmp_near (id int) TYPE=HEAP
+		CREATE TEMPORARY TABLE ct_tmp_near (id int)
 	",1);
 	my $sql = '';
 	$sql .= "INSERT INTO ct_tmp_near (id)\n";

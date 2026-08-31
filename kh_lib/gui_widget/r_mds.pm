@@ -109,7 +109,6 @@ sub _new{
 				['Classical', 'C' ],
 				['Kruskal',   'K' ],
 				['Sammon',    'S' ],
-				['SMACOF',    'SM'],
 			],
 		variable => \$self->{method_opt},
 		#command => sub{$self->check_rs_widget;},

@@ -26,7 +26,7 @@ sub out2{                               # length作製をする
 			len INT,
 			genkei_id INT
 		)";
-	$sql1 .= " ENGINE = MEMORY" if $::config_obj->use_heap;
+	$sql1 .= "" if $::config_obj->use_heap;
 	mysql_exec->do($sql1, 1);
 	
 	mysql_exec->do("

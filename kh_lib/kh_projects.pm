@@ -3,7 +3,6 @@ use kh_project;
 use strict;
 use DBI;
 use DBD::CSV;
-use DBD::mysql;
 use Jcode;
 
 #--------------------------------------#

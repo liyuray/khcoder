@@ -72,7 +72,7 @@ sub ready{
 			CREATE TABLE $table (
 				id  INT primary key not null,
 				num FLOAT
-			) TYPE = HEAP
+			)
 		",1);
 		mysql_exec->do("
 			INSERT INTO $table (id, num)

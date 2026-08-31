@@ -147,7 +147,7 @@ sub _hyoso_ext{
 	mysql_exec->do("
 		create $temporary table temp_conc_hyoso(
 			id int primary key not null
-		)  TYPE = HEAP
+		)
 	",1);
 	
 	# 語が指定されている場合
@@ -225,7 +225,7 @@ sub _find{
 			r3 int,
 			r4 int,
 			r5 int
-		)  TYPE = HEAP
+		)
 	",1);
 
 	# 検索して投入
@@ -274,7 +274,7 @@ sub _tuika{
 		mysql_exec->do("
 			create $temporary table temp_conc_hyoso_opt$i(
 				id int primary key not null
-			)  TYPE = HEAP
+			)
 		",1);
 		# 語が指定されている場合
 		if ( length($self->{tuika}{$i}{query}) ){
@@ -337,7 +337,7 @@ sub _tuika{
 			r3 int,
 			r4 int,
 			r5 int
-		) TYPE = HEAP
+		)
 	",1);
 	
 	my $cols = {
@@ -427,7 +427,7 @@ sub _sort{
 		chop $sql;
 		chop $sql;
 		chop $sql_temp0;
-		$sql .= "\n) TYPE = HEAP";
+		$sql .= "\n)";
 		mysql_exec->do($sql,1);
 		
 		# 基本形を投入
@@ -802,7 +802,7 @@ sub coloc{
 		$sql .= "\t$i int not null,\n";
 	}
 	chop $sql; chop $sql;
-	$sql .= ") TYPE = HEAP";
+	$sql .= ")";
 	mysql_exec->do($sql);
 	
 	# 整形して仮テーブルに投入

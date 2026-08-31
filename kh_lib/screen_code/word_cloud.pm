@@ -160,7 +160,7 @@ sub do_word_cloud{
 		foreach my $i (keys %{$filter->{hinshi}}){
 			if ($filter->{hinshi}{$i}){
 				$sql .= "\t\t";
-				$sql .= "|| " if $n;
+				$sql .= "OR " if $n;
 				$sql .= "genkei.khhinshi_id = $i\n";
 				++$n;
 			}

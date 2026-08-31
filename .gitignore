@@ -1,0 +1,9 @@
+config/coder.ini
+config/coder.ini.bak
+config/win.ini
+config/hinshi_*
+config/projects
+config/sql.log
+config/R-bridge/
+config/khc*/
+kh_lib/Tk/si_*100.png

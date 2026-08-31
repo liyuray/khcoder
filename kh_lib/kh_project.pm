@@ -373,7 +373,7 @@ sub morpho_analyzer{
 	my $self = shift;
 	my $v = shift;
 	
-	my $name = $self->dbname.'.';
+	my $name = '';
 	
 	if (defined($v)){
 		mysql_exec->do("
@@ -407,7 +407,7 @@ sub morpho_analyzer_lang{
 	my $self = shift;
 	my $v = shift;
 	
-	my $name = $self->dbname.'.';
+	my $name = '';
 	
 	if (defined($v)){
 		mysql_exec->do("

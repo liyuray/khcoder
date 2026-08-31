@@ -47,7 +47,7 @@ sub get{
 			genkei.khhinshi_id = hselection.khhinshi_id
 			AND (
 				   hselection.name = 'HTML¥¿¥°'
-				|| hselection.name = 'HTML_TAG'
+				OR hselection.name = 'HTML_TAG'
 			)
 	",1)->hundle;
 	while (my $i = $html->fetch){
