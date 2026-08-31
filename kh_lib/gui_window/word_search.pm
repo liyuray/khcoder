@@ -257,7 +257,7 @@ sub _new{
 			  AND hyoso.genkei_id = genkei.id
 			  AND genkei.khhinshi_id = khhinshi.id
 			GROUP BY katuyo.id, khhinshi.id
-			ORDER BY khhinshi_id
+			ORDER BY khhinshi.id
 		")->hundle;
 		
 		while (my $i = $h->fetch){

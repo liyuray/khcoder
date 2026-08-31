@@ -33,6 +33,7 @@ sub import {
 	$INC{'gui_window.pm'}   ||= __FILE__;
 	$INC{'gui_errormsg.pm'} ||= __FILE__;
 	$INC{'gui_wait.pm'}     ||= __FILE__;
+	$::main_gui = bless {}, 'gui_window::main' unless defined $::main_gui;
 	return 1;
 }
 
@@ -55,6 +56,20 @@ sub open {
 	warn "KH Coder: $msg$where\n";
 	return 0;
 }
+
+#--------------------------------------------------#
+# Some engine paths hand a parent window to the error dialog; headless there is
+# none, but the reference must still resolve or the error itself dies.
+package gui_window::main;
+use strict;
+sub mw       { return undef }
+sub win_obj  { return undef }
+sub get      { return undef }
+sub if_opened{ return 0 }
+sub close_all{ return 1 }
+sub menu     { return $_[0] }
+sub inner    { return $_[0] }
+sub refresh  { return 1 }
 
 #--------------------------------------------------#
 package gui_wait;

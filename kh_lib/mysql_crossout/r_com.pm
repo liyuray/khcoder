@@ -343,7 +343,7 @@ sub make_list{
 	if ($self->{max_df}){
 		$sql .= "AND df_$self->{tani}.f <= $self->{max_df}\n";
 	}
-	$sql .= "ORDER BY khhinshi_id, genkei.num DESC, ";
+	$sql .= "ORDER BY hselection.khhinshi_id, genkei.num DESC, ";
 	$sql .= $::project_obj->mysql_sort('genkei.name');
 	
 	my $sth = mysql_exec->select($sql, 1)->hundle;

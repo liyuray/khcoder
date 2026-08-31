@@ -1,7 +1,7 @@
 package kh_project_io;
 
 use strict;
-use File::Copy qw(copy);
+use File::Copy qw(copy move);
 use MIME::Base64;
 use YAML qw(DumpFile LoadFile);
 use Archive::Zip qw( :ERROR_CODES );
@@ -137,7 +137,7 @@ sub import{
 		print "Could not extract $ext file!\n";
 		return undef;
 	}
-	rename($file_temp_target, $file_target) or
+	File::Copy::move($file_temp_target, $file_target) or
 		gui_errormsg->open(
 			type => 'file',
 			file => $file_target

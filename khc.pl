@@ -55,6 +55,11 @@ use kh_cod;
 use kh_cod::func;
 use kh_cod::asso;
 use mysql_crossout;
+use mysql_crossout::r_com;
+use kh_r_plot;
+use mysql_getheader;
+use kh_datacheck;
+require kh_project_io;
 use kh_morpho;
 use my_threads;
 
@@ -67,7 +72,7 @@ binmode STDERR, ':encoding(UTF-8)';
 use Encode ();
 @ARGV = map { Encode::is_utf8($_) ? $_ : Encode::decode('UTF-8', $_) } @ARGV;
 
-# R is only needed for plots; the CLI does not draw any.
+# R is started only when a command needs it (see need_r below).
 $::config_obj->{R} = 0;
 my_threads->init;
 
@@ -131,6 +136,9 @@ usage: khc.pl <command> [options]
   new --target FILE [--column N] [--name TEXT] [--lang jp] [--method mecab]
   prep   --project NAME         run pre-processing (morphological analysis)
   drop   --project NAME         remove a project, its database and working files
+  check  --project NAME         check the target text (Pre-Processing menu)
+  archive --project NAME --out FILE.khc          export the whole project
+  restore --archive FILE.khc --target FILE       import one back
   stats  --project NAME         the figures shown on the main window
   words  --project NAME [--limit N] [--query TEXT] [--mode p|c|k|z]
   conc   --project NAME --query WORD [--length N]
@@ -144,6 +152,9 @@ usage: khc.pl <command> [options]
   cod-jaccard --project NAME --rules FILE   code similarity matrix
   cod-crosstab --project NAME --rules FILE --var NAME
   export      --project NAME --out FILE [--type def|1c|150] [--ftype csv|xls]
+
+  plot   --project NAME --kind KIND --out FILE.png
+                [--min N] [--max N] [--clusters N] [--dist binary|Dice|Simpson|pearson|euclid]
 
   --tani bun|dan|h1..h5         unit of aggregation (default bun)
 
@@ -178,6 +189,57 @@ sub coding_rules {
 # Every part of speech the project is set to use. Both the word list and word
 # association refuse to run with an empty selection, so this is the default the
 # GUI offers.
+# Start the R bridge. Only the plot commands need it, so it is not paid for
+# by the tabular ones.
+sub need_r {
+	return $::config_obj->{R} if $::config_obj->{R};
+	require Statistics::R;
+	{ no warnings 'redefine', 'once'; *Statistics::R::output_chk = sub { 1 }; }
+	my $dir = $::config_obj->{cwd} . '/config/R-bridge';
+	mkdir $dir unless -d $dir;
+	$::config_obj->{R} = Statistics::R->new(
+		r_bin   => $::config_obj->os_path( $::config_obj->r_path ),
+		log_dir => $dir, tmp_dir => $dir,
+	) or die "khc: could not start R\n";
+	$::config_obj->{R}->startR;
+	$::config_obj->{R}->send('Sys.setlocale(category="LC_ALL",locale="ja_JP.UTF-8")');
+	$::config_obj->{R}->read();
+	$::config_obj->{R}->output_chk(1);
+	# Statistics::R moves the process into its tmp_dir; the engine builds paths
+	# relative to the project root, so go back, as kh_coder.pl does.
+	chdir( $::config_obj->{cwd} );
+	return $::config_obj->{R};
+}
+
+# The document-word matrix, as the R command that loads it.
+sub data_matrix {
+	my %a = @_;
+	my $pos = used_pos();
+	return mysql_crossout::r_com->new(
+		tani     => $OPT{tani}, tani2 => $OPT{tani},
+		hinshi   => [ sort { $a <=> $b } keys %$pos ],
+		max      => ( $OPT{max}    // 0 ),
+		min      => ( $OPT{min}    // 0 ),
+		max_df   => ( $OPT{max_df} // 0 ),
+		min_df   => ( $OPT{min_df} // 0 ),
+		rownames => 0,
+		sampling => 0,
+		%a,
+	)->run;
+}
+
+sub word_count {
+	my $pos = used_pos();
+	my $n = mysql_crossout::r_com->new(
+		tani   => $OPT{tani}, tani2 => $OPT{tani},
+		hinshi => [ sort { $a <=> $b } keys %$pos ],
+		max    => ( $OPT{max}    // 0 ), min    => ( $OPT{min}    // 0 ),
+		max_df => ( $OPT{max_df} // 0 ), min_df => ( $OPT{min_df} // 0 ),
+	)->wnum;
+	$n =~ s/,//g;
+	return $n + 0;
+}
+
 sub used_pos {
 	my %pos;
 	my $h = mysql_exec->select("SELECT khhinshi_id FROM hselection WHERE ifuse = 1", 1)->hundle;
@@ -447,6 +509,158 @@ $CMD{export} = sub {
 	emit({ written => $OPT{out}, rows => scalar(@{ $table || [] }) });
 };
 
+# Plot kinds, each mapping to the package-level make_plot in its window module.
+my %PLOT = (
+	cls => {
+		module => 'gui_window::word_cls',
+		build  => sub {
+			my $r = data_matrix();
+			$r .= "d <- t(d)\n# END: DATA\n";
+			return ( r_command => $r, plotwin_name => 'word_cls',
+			         cluster_number => ( $OPT{clusters} // 'auto' ),
+			         cluster_color  => 1,
+			         # Jaccard=binary, Dice, Simpson, Cosine=pearson, Euclid=euclid
+			         method_dist    => ( $OPT{dist}   // 'binary' ),
+			         method_mthd    => ( $OPT{clust}  // 'ward' ) );
+		},
+	},
+	corresp => {
+		module => 'gui_window::word_corresp',
+		size   => 800,
+		build  => sub {
+			my $r = data_matrix();
+			$r .= "d <- t(d)\n";
+			$r .= "d <- subset(d, rowSums(d) > 0)\n";
+			$r .= "d <- t(d)\n";
+			# corresp.matrix rejects an all-zero row or column, so drop both.
+			$r .= "d <- d[rowSums(d) > 0, , drop=FALSE]\n";
+			$r .= "d <- d[, colSums(d) > 0, drop=FALSE]\n";
+			# word_corresp's own prep declares this before the plot code; it
+			# counts the external-variable groups drawn alongside the words,
+			# and none are included here.
+			$r .= "v_count <- 0\n";
+			$r .= "# END: DATA\n";
+			return ( r_command => $r, plotwin_name => 'word_corresp',
+			         d_x => ( $OPT{x} // 1 ), d_y => ( $OPT{y} // 2 ),
+			         show_origin => 1, scaling => 0, zoom => 1,
+			         biplot => 0, flt => 0, flw => 0,
+			         bubble => 0, bubble_size => 1, resize_vars => 0,
+			         breaks => 0, use_alpha => 1,
+			         margin_top => 0, margin_bottom => 0,
+			         margin_left => 0, margin_right => 0,
+			         width  => ( $OPT{size} // 800 ),
+			         height => ( $OPT{size} // 800 ) );
+		},
+	},
+	mds => {
+		module => 'gui_window::word_mds',
+		size   => 800,
+		build  => sub {
+			my $r = data_matrix();
+			$r .= "d <- t(d)\n# END: DATA\n";
+			return ( r_command => $r, plotwin_name => 'word_mds',
+			         # K = Kruskal, C = Classical (SMACOF is not installed)
+			         method        => ( $OPT{mds}  // 'K' ),
+			         method_dist   => ( $OPT{dist} // 'binary' ),
+			         dim_number    => ( $OPT{dim}  // 2 ),
+			         bubble        => 0, bubble_size => 1,
+			         n_cls         => ( $OPT{clusters} && $OPT{clusters} ne 'auto'
+			                            ? $OPT{clusters} : 0 ),
+			         cls_raw       => '',
+			         fix_asp       => 1,
+			         use_alpha     => 1,
+			         random_starts => 0,
+			         # make_plot also reads these; the GUI supplies them from
+			         # its margin and bubble widgets.
+			         breaks        => 0, bubble_var => '', std_radius => 0,
+			         margin_top    => 0, margin_bottom => 0,
+			         margin_left   => 0, margin_right  => 0,
+			         width         => ( $OPT{size} // 800 ),
+			         height        => ( $OPT{size} // 800 ) );
+		},
+	},
+);
+
+$CMD{check} = sub {
+	open_project( $OPT{project} );
+	# kh_datacheck reports its verdict -- including "nothing wrong" -- through
+	# the message dialog, so that must not be fatal here.
+	local $kh_headless::DIE_ON_ERROR = 0;
+	my $r = kh_datacheck->run or die "khc: the data check produced no report\n";
+	emit({ summary => ( $r->{repo_sum}  // '' ),
+	       report  => ( $r->{repo_full} // '' ),
+	       clean   => ( $r->{auto_ok} ? 1 : 0 ) });
+};
+
+$CMD{archive} = sub {
+	open_project( $OPT{project} );
+	die_usage('--out FILE is required (a .khc archive)') unless $OPT{out};
+	kh_project_io::export( $OPT{out} ) or die "khc: export failed\n";
+	die "khc: nothing was written to $OPT{out}\n" unless -s $OPT{out};
+	emit({ written => $OPT{out}, bytes => -s $OPT{out} });
+};
+
+$CMD{restore} = sub {
+	die_usage('--archive FILE is required') unless $OPT{archive};
+	die "khc: no such archive: $OPT{archive}\n" unless -e $OPT{archive};
+	die_usage('--target FILE is required (where the source text is restored to)')
+		unless $OPT{target};
+	# import() ends with "undef $::project_obj", so its return value says
+	# nothing; the registry is what confirms the project arrived.
+	kh_project_io::import( $OPT{archive}, $OPT{target} );
+
+	my ($new) = grep { $_->{target} =~ /\Q$OPT{target}\E/ }
+	                 @{ kh_projects->read->list };
+	die "khc: the archive did not restore\n" unless $new;
+	emit({ project => $new->{dbname}, target => $OPT{target},
+	       db => mysql_exec->db_path( $new->{dbname} ) });
+};
+
+$CMD{plot} = sub {
+	die_usage('--out FILE is required') unless $OPT{out};
+	my $kind = $OPT{kind} // 'cls';
+	my $spec = $PLOT{$kind}
+		or die "khc: unknown --kind $kind (have: " . join(', ', sort keys %PLOT) . ")\n";
+
+	open_project( $OPT{project} );
+	need_r();
+	eval "require $spec->{module}; 1" or die "khc: $@";
+
+	my $n = word_count();
+	die "khc: only $n words pass the filters; need at least 3\n" if $n < 3;
+
+	my %build = $spec->{build}->();
+	my $win   = $build{plotwin_name};
+
+	# make_plot ends by opening the Tk window that displays the result. The
+	# image itself is already on disk by then, so the display step is stubbed
+	# out and the file picked up afterwards.
+	{
+		no strict 'refs';
+		no warnings 'redefine';
+		*{"gui_window::r_plot::${win}::open"} = sub { return 1 };
+	}
+
+	no strict 'refs';
+	my $make = $spec->{module} . '::make_plot';
+	&$make(
+		%build,
+		font_size   => ( $OPT{font_size} // 1 ),
+		font_bold   => 0,
+		plot_size   => ( $OPT{size} // $spec->{size} // 'auto' ),
+		data_number => $n,
+	) or die "khc: the plot could not be produced\n";
+
+	my $src = $::config_obj->{cwd} . '/config/R-bridge/'
+	        . $::project_obj->dbname . '_' . $win . '_1.png';
+	die "khc: R produced no image at $src\n" unless -s $src;
+
+	require File::Copy;
+	File::Copy::copy($src, $OPT{out}) or die "khc: could not write $OPT{out}: $!\n";
+	emit({ written => $OPT{out}, kind => $kind, words => $n,
+	       bytes => -s $OPT{out} });
+};
+
 $CMD{sql} = sub {
 	my $sql = shift;
 	die_usage('a SQL statement is required') unless defined $sql && length $sql;
@@ -473,6 +687,9 @@ GetOptionsFromArray(\@argv, \%OPT,
 	'limit=i', 'length=i', 'column=i', 'id=i',
 	'lang=s', 'method=s', 'mode=s', 'json',
 	'rules=s', 'tani=s', 'var=s', 'out=s', 'type=s', 'ftype=s', 'sort=s', 'min_doc=i', 'num=s',
+	'kind=s', 'clusters=s', 'dist=s', 'clust=s', 'size=s', 'font_size=f',
+	'mds=s', 'dim=i', 'x=i', 'y=i', 'archive=s',
+	'max=i', 'min=i', 'max_df=i', 'min_df=i',
 ) or die_usage('bad options');
 
 eval { $CMD{$cmd}->(@argv); 1 } or do {

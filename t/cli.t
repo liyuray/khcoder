@@ -229,6 +229,47 @@ like( $ex, qr/"rows":[1-9]/, 'word list export reports rows' );
 }
 
 #--------------------------------------------------------------------#
+#   group 2: R plots                                                 #
+#--------------------------------------------------------------------#
+
+for my $kind (qw(cls mds corresp)) {
+    my $png  = "$TMP/khc_test_$kind.png";
+    unlink $png if -e $png;
+    my @args = ('plot', '--project', $PROJECT, '--kind', $kind,
+                '--out', $png, '--min', 50, '--json');
+    push @args, ('--tani', 'h5') if $kind eq 'corresp';   # sentences are too sparse
+    my $out = khc(@args);
+
+    like( $out, qr/"written"/, "$kind plot reports a file" );
+    ++$ran;
+    if ( -s $png > 5000 ) { print "ok $ran - $kind plot wrote a real PNG\n" }
+    else { ++$failed; print "not ok $ran - $kind plot wrote a real PNG (", (-s $png || 0), " bytes)\n" }
+}
+
+#--------------------------------------------------------------------#
+#   group 3: project operations                                      #
+#--------------------------------------------------------------------#
+
+my $khc_file = "$TMP/khc_test_archive.khc";
+unlink $khc_file if -e $khc_file;
+my $arc = khc('archive', '--project', $PROJECT, '--out', $khc_file, '--json');
+like( $arc, qr/"bytes":[1-9]/, 'project archive reports a size' );
+
+my $restored_src = "$TMP/khc_test_restored.xls";
+unlink $restored_src if -e $restored_src;
+my $res = khc('restore', '--archive', $khc_file, '--target', $restored_src, '--json');
+my $newdb = json_get($res, 'project');
+like( $newdb, qr/^khc\d+$/, 'archive restores into a new project' );
+
+if ( $newdb ) {
+    # The restored project must carry the same corpus, not just register.
+    my $rs = khc('stats', '--project', $newdb, '--json');
+    is( json_get($rs, 'sentences'), 5064, 'restored project has all 5,064 sentences' );
+    is( json_get($rs, 'words'),     6048, 'restored project has all word forms' );
+    khc('drop', '--project', $newdb);
+}
+
+#--------------------------------------------------------------------#
 
 print "\n1..$ran\n";
 print $failed ? "# FAILED $failed of $ran\n" : "# all $ran tests passed\n";
