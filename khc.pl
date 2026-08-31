@@ -195,33 +195,15 @@ sub coding_rules {
 # by the tabular ones.
 sub need_r {
 	return $::config_obj->{R} if $::config_obj->{R};
-	require Statistics::R;
-	{ no warnings 'redefine', 'once'; *Statistics::R::output_chk = sub { 1 }; }
+	require Statistics::R;      # CPAN 0.34: a private R process per object
 	my $dir = $::config_obj->{cwd} . '/config/R-bridge';
-	mkdir $dir unless -d $dir;
+	mkdir $dir unless -d $dir;  # still where plot images and temp .r files go
 
-	# Clear a lock left behind by a killed run.
-	#
-	# Statistics::R::Bridge::pipe records the holder's $$ in lock.pid
-	# (pipe.pm:371) and treats the lock as stale only when kill(0, pid) fails
-	# (pipe.pm:407). Under "docker run ... perl khc.pl" perl is pid 1, so the
-	# file says 1; every later container also has a live pid 1 -- its own main
-	# process -- so the liveness check says "still held" and the next run waits
-	# out the ~83 minute bound in pipe.pm:197. A pid is only meaningful inside
-	# the namespace that produced it, and this file outlives that namespace on
-	# a bind mount.
-	#
-	# khc.pl is one-shot, so any lock present before we start R is not ours.
-	# Concurrent plot commands on one project are unsupported regardless:
-	# Statistics::R::Bridge::pipe::start tears down whatever session it finds.
-	my $lock = "$dir/lock.pid";
-	if ( -e $lock ) {
-		print STDERR "khc: clearing a stale R lock ($lock)\n";
-		unlink $lock;
-	}
+	# No log_dir/tmp_dir: CPAN Statistics::R talks to R over IPC::Run rather
+	# than through files in a shared directory, so there is nothing to collide
+	# on and no lock.pid to go stale.
 	$::config_obj->{R} = Statistics::R->new(
-		r_bin   => $::config_obj->os_path( $::config_obj->r_path ),
-		log_dir => $dir, tmp_dir => $dir,
+		r_bin => $::config_obj->os_path( $::config_obj->r_path ),
 	) or die "khc: could not start R\n";
 	$::config_obj->{R}->startR;
 	$::config_obj->{R}->send('Sys.setlocale(category="LC_ALL",locale="ja_JP.UTF-8")');

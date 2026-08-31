@@ -86,13 +86,41 @@ the output check at 20 seconds (`pipe.pm:232`); both then give up with
 "Could not send the command to R!". A front end should impose its own timeout
 rather than inherit that one.
 
-### Plots cannot run concurrently on one project
+### Plots now run concurrently — the R bridge was replaced
 
-`kh_r_plot` names its working files by project inside `config/R-bridge/`, so
-two plot commands against the same project collide and both stall until one is
-killed. This is the concrete form of the package-global state noted under
-Risks: an HTTP layer must serialise plot requests per project. It also means a
-test suite has to run them one at a time.
+KH Coder vendored an old copy of `Statistics::R` under `kh_lib/Statistics/`.
+Its bridge talked to R through files in one shared directory, which made
+concurrency impossible and, worse, unsafe:
+
+- Every path derived from a single `LOG_DIR` — `lock.pid`, `R.pid`,
+  `process.log`, `output.log`, `input.N.r` — with no project or session in the
+  name, so **two different projects collided as readily as two plots on one**.
+- `start()` called `stop()` then `clean_log_dir()`, so a second session did not
+  merely wait: it read the first session's `R.pid`, killed it, and emptied the
+  directory.
+- The advisory lock stored the holder's `$$`. Under `docker run … perl khc.pl`
+  perl is pid 1, and a lock is treated as stale only when `kill(0, pid)` fails
+  — but every later container has a live pid 1 of its own. One killed run
+  poisoned the bridge for every run after it.
+
+That tree is gone. The build already had CPAN **Statistics::R 0.34**, which
+speaks to R over `IPC::Run` — a private R process per object, no lock file, no
+shared directory. `Statistics::R::Legacy` maps the old calls (`startR`, `send`,
+`read`, `lock`, `unlock`) onto it, with the locks as no-ops.
+
+Two gaps had to be filled, both in `kh_lib/kh_headless.pm`:
+
+- **`output_chk`** does not exist in 0.34. It told the old polling bridge
+  whether to wait for output to appear; `run()` is synchronous, so it is a
+  no-op stub for the 28 call sites that still set it.
+- **`wrap_cmd` appended its end-of-stream marker to the last line** of the
+  command. KH Coder's generated scripts routinely end with a comment —
+  `# END: DATA`, `# dpi: short based` — which swallowed the marker, so R never
+  signalled completion and the caller hung. The override puts it on its own
+  line.
+
+Verified: two plots on the same project, launched together, both finish, and
+the dendrogram is byte-for-byte identical to the serial run.
 
 ## What the CLI exposed
 

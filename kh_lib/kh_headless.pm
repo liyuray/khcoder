@@ -38,6 +38,41 @@ sub import {
 }
 
 #--------------------------------------------------#
+# CPAN Statistics::R replaces the bridge KH Coder used to vendor. It has no
+# output_chk -- that told the old file-polling bridge whether to wait for
+# output to appear, and run() is synchronous -- so it is stubbed here for the
+# 28 call sites that still set it.
+package Statistics::R;
+use strict;
+
+# Compile-time so the real module is in place before the overrides below are
+# installed; a plain require would load it afterwards and undo them.
+BEGIN { require Statistics::R }
+
+our $output_chk;
+sub output_chk {
+	my $self = shift;
+	$output_chk = shift if @_;
+	return $output_chk;
+}
+
+# Statistics::R::wrap_cmd appends its end-of-stream marker to the LAST LINE of
+# the command:
+#     $cmd .= qq`; write("`.EOS.qq`",stdout())\n`;
+# KH Coder's generated scripts routinely end with a comment -- "# END: DATA",
+# "# dpi: short based", "# breaks: 0" -- which swallows the marker, so R never
+# signals completion. Putting it on its own line fixes that without touching
+# the installed module.
+{
+	no warnings 'redefine';
+	*Statistics::R::wrap_cmd = sub {
+		my ($self, $cmd) = @_;
+		$cmd =~ s/[\r\n]+\z//;
+		return $cmd . qq{\nwrite("} . Statistics::R::EOS() . qq{",stdout())\n};
+	};
+}
+
+#--------------------------------------------------#
 package gui_errormsg;
 use strict;
 
