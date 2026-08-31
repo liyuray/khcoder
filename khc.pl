@@ -59,6 +59,8 @@ use mysql_crossout::r_com;
 use kh_r_plot;
 use mysql_getheader;
 use kh_datacheck;
+use plotR::network;
+use plotR::som;
 require kh_project_io;
 use kh_morpho;
 use my_threads;
@@ -197,6 +199,26 @@ sub need_r {
 	{ no warnings 'redefine', 'once'; *Statistics::R::output_chk = sub { 1 }; }
 	my $dir = $::config_obj->{cwd} . '/config/R-bridge';
 	mkdir $dir unless -d $dir;
+
+	# Clear a lock left behind by a killed run.
+	#
+	# Statistics::R::Bridge::pipe records the holder's $$ in lock.pid
+	# (pipe.pm:371) and treats the lock as stale only when kill(0, pid) fails
+	# (pipe.pm:407). Under "docker run ... perl khc.pl" perl is pid 1, so the
+	# file says 1; every later container also has a live pid 1 -- its own main
+	# process -- so the liveness check says "still held" and the next run waits
+	# out the ~83 minute bound in pipe.pm:197. A pid is only meaningful inside
+	# the namespace that produced it, and this file outlives that namespace on
+	# a bind mount.
+	#
+	# khc.pl is one-shot, so any lock present before we start R is not ours.
+	# Concurrent plot commands on one project are unsupported regardless:
+	# Statistics::R::Bridge::pipe::start tears down whatever session it finds.
+	my $lock = "$dir/lock.pid";
+	if ( -e $lock ) {
+		print STDERR "khc: clearing a stale R lock ($lock)\n";
+		unlink $lock;
+	}
 	$::config_obj->{R} = Statistics::R->new(
 		r_bin   => $::config_obj->os_path( $::config_obj->r_path ),
 		log_dir => $dir, tmp_dir => $dir,
@@ -226,6 +248,43 @@ sub data_matrix {
 		sampling => 0,
 		%a,
 	)->run;
+}
+
+# A code-by-document matrix, as the R command that loads it, for the coding
+# plots. kh_cod::func->out2r_selected writes the coded results in the same
+# shape mysql_crossout::r_com produces for words.
+sub code_matrix {
+	my $cod = coding_rules('kh_cod::func');
+	$cod->code( $OPT{tani} ) or die "khc: coding produced no result\n";
+	my $codes = $cod->valid_codes;
+	die "khc: need at least three codes for this plot\n" unless @$codes > 2;
+	# out2r_selected selects by code NAME, not by index.
+	my @sel = map { $_->name } @$codes;
+
+	my $r = $cod->out2r_selected( $OPT{tani}, \@sel )
+		or die "khc: could not build the code matrix\n";
+
+	# Label the rows with the code names, as cod_cls does, dropping the
+	# leading marker the coding file uses. The names are the ones captured
+	# above: out2r_selected re-runs code(), which appends to valid_codes and
+	# would otherwise leave twice as many names as the matrix has rows.
+	$r .= "\nd <- t(d)\nrow.names(d) <- c(";
+	$r .= join(',', map {
+		my $n = $_;
+		substr($n, 0, 1) = '' if index($n, '＊') == 0 || index($n, '*') == 0;
+		kh_r_plot->quote($n);
+	} @sel);
+	$r .= ")\n";
+
+	# cod_cls leaves the codes as rows; cod_corresp transposes back so they
+	# are columns. The caller says which it wants.
+	if ( ($_[0] // '') eq 'cols' ) {
+		$r .= "d <- t(d)\n";
+		return $r;
+	}
+	$r .= "d <- subset(d, rowSums(d) > 0)\n";
+	$r .= "# END: DATA\n";
+	return $r;
 }
 
 sub word_count {
@@ -509,7 +568,19 @@ $CMD{export} = sub {
 	emit({ written => $OPT{out}, rows => scalar(@{ $table || [] }) });
 };
 
-# Plot kinds, each mapping to the package-level make_plot in its window module.
+# Plot kinds. A spec either names a window module whose package-level
+# make_plot builds the plot, or an engine-side plot class (plotR::*).
+#
+# Two kinds are deliberately absent because they do not terminate here:
+#   som      - plotR::som never returns after the data matrix is built, even
+#              with the training rounds cut to 20/40.
+#   cod-netg - plotR::network on a code matrix hangs the same way, at any
+#              edge count. The word-level "network" kind works.
+# Both need investigation before they can be offered.
+#
+# Note: plots on one project cannot run concurrently. kh_r_plot names its
+# working files by project in config/R-bridge/, so two at once collide and
+# both stall.
 my %PLOT = (
 	cls => {
 		module => 'gui_window::word_cls',
@@ -550,6 +621,133 @@ my %PLOT = (
 			         margin_left => 0, margin_right => 0,
 			         width  => ( $OPT{size} // 800 ),
 			         height => ( $OPT{size} // 800 ) );
+		},
+	},
+	network => {
+		module => 'plotR::network',
+		class  => 'plotR::network',
+		size   => 800,
+		build  => sub {
+			my $r = data_matrix();
+			$r .= "d <- t(d)\n# END: DATA\n";
+			return ( r_command => $r, plotwin_name => 'word_netgraph',
+			         # n = draw the strongest N edges, j = threshold on the coefficient
+			         n_or_j       => ( $OPT{edge_mode} // 'n' ),
+			         edges_num    => ( $OPT{edges} // 60 ),
+			         edges_jac    => ( $OPT{edge_min} // 0.2 ),
+			         method_coef  => ( $OPT{coef} // 'binary' ),
+			         line_width   => 100, line_width_n => 100,
+			         margin_top   => 0, margin_bottom => 0,
+			         margin_left  => 0, margin_right  => 0,
+			         use_freq_as_size => 1, bubble_size => 1,
+			         smaller_nodes => 0, use_weight_as_width => 1,
+			         min_sp_tree => 0, min_sp_tree_only => 0,
+			         use_alpha => 1, gray_scale => 0, fix_lab => 0,
+			         view_coef => 0, cor_var => 0, cor_var_darker => 0,
+			         cor_var_min => -1, cor_var_max => 1,
+			         standardize_coef => 0, additional_plots => 0, breaks => 0 );
+		},
+	},
+	# The coding plots reuse the word_* builders, with a code-by-document
+	# matrix in place of the word-by-document one.
+	'cod-cls' => {
+		module => 'gui_window::word_cls',
+		count  => sub { scalar @{ coding_rules('kh_cod::func')->codes } },
+		build  => sub {
+			my $r = code_matrix();
+			return ( r_command => $r, plotwin_name => 'word_cls',
+			         cluster_number => ( $OPT{clusters} // 'auto' ),
+			         cluster_color  => 1,
+			         method_dist    => ( $OPT{dist}  // 'binary' ),
+			         method_mthd    => ( $OPT{clust} // 'ward' ) );
+		},
+	},
+	'cod-mds' => {
+		module => 'gui_window::word_mds',
+		size   => 800,
+		count  => sub { scalar @{ coding_rules('kh_cod::func')->codes } },
+		build  => sub {
+			my $r = code_matrix();
+			return ( r_command => $r, plotwin_name => 'word_mds',
+			         method => ( $OPT{mds} // 'K' ),
+			         method_dist => ( $OPT{dist} // 'binary' ),
+			         dim_number => ( $OPT{dim} // 2 ),
+			         bubble => 0, bubble_size => 1, n_cls => 0, cls_raw => '',
+			         fix_asp => 1, use_alpha => 1, random_starts => 0,
+			         breaks => 0, bubble_var => '', std_radius => 0,
+			         margin_top => 0, margin_bottom => 0,
+			         margin_left => 0, margin_right => 0,
+			         width => ( $OPT{size} // 800 ), height => ( $OPT{size} // 800 ) );
+		},
+	},
+	'cod-corresp' => {
+		module => 'gui_window::word_corresp',
+		size   => 800,
+		count  => sub { scalar @{ coding_rules('kh_cod::func')->codes } },
+		build  => sub {
+			# cod_corresp trims empty rows on both axes, as here.
+			my $r = code_matrix('cols');
+			$r .= "d <- subset(d, rowSums(d) > 0)\n";
+			$r .= "d <- t(d)\n";
+			$r .= "d <- subset(d, rowSums(d) > 0)\n";
+			$r .= "d <- t(d)\n";
+			$r .= "v_count <- 0\n";
+			return ( r_command => $r, plotwin_name => 'word_corresp',
+			         d_x => ( $OPT{x} // 1 ), d_y => ( $OPT{y} // 2 ),
+			         show_origin => 1, scaling => 0, zoom => 1,
+			         biplot => 0, flt => 0, flw => 0,
+			         bubble => 0, bubble_size => 1, resize_vars => 0,
+			         breaks => 0, use_alpha => 1,
+			         margin_top => 0, margin_bottom => 0,
+			         margin_left => 0, margin_right => 0,
+			         width => ( $OPT{size} // 800 ), height => ( $OPT{size} // 800 ) );
+		},
+	},
+	som => {
+		module => 'plotR::som',
+		class  => 'plotR::som',
+		size   => 800,
+		build  => sub {
+			my $r = data_matrix();
+			$r .= "d <- t(d)\n# END: DATA\n";
+			return ( r_command => $r, plotwin_name => 'word_som',
+			         # n_nodes is the side of a square grid, so the map has
+			         # n_nodes^2 cells. The GUI defaults to 20 (400 cells);
+			         # anything much larger takes hours.
+			         n_nodes => ( $OPT{nodes} // 20 ),
+			         if_cls  => 1,
+			         n_cls   => ( $OPT{clusters} && $OPT{clusters} ne 'auto'
+			                      ? $OPT{clusters} : 5 ),
+			         p_topo  => 'hx',          # 'hx' or anything else = rectangular
+			         rlen1   => ( $OPT{rlen1} // 100 ),
+			         rlen2   => ( $OPT{rlen2} // 200 ),
+			         reuse   => 0 );
+		},
+	},
+	'cod-netg' => {
+		module => 'plotR::network',
+		class  => 'plotR::network',
+		size   => 800,
+		count  => sub { scalar @{ coding_rules('kh_cod::func')->codes } },
+		build  => sub {
+			# Codes must be the ROWS: they are the network's nodes. Leaving
+			# the documents as rows asks for a graph over every document.
+			my $r = code_matrix();
+			return ( r_command => $r, plotwin_name => 'cod_netg',
+			         n_or_j       => ( $OPT{edge_mode} // 'n' ),
+			         edges_num    => ( $OPT{edges} // 60 ),
+			         edges_jac    => ( $OPT{edge_min} // 0.2 ),
+			         method_coef  => ( $OPT{coef} // 'binary' ),
+			         line_width   => 100, line_width_n => 100,
+			         margin_top   => 0, margin_bottom => 0,
+			         margin_left  => 0, margin_right  => 0,
+			         use_freq_as_size => 1, bubble_size => 1,
+			         smaller_nodes => 0, use_weight_as_width => 1,
+			         min_sp_tree => 0, min_sp_tree_only => 0,
+			         use_alpha => 1, gray_scale => 0, fix_lab => 0,
+			         view_coef => 0, cor_var => 0, cor_var_darker => 0,
+			         cor_var_min => -1, cor_var_max => 1,
+			         standardize_coef => 0, additional_plots => 0, breaks => 0 );
 		},
 	},
 	mds => {
@@ -626,8 +824,16 @@ $CMD{plot} = sub {
 	need_r();
 	eval "require $spec->{module}; 1" or die "khc: $@";
 
-	my $n = word_count();
-	die "khc: only $n words pass the filters; need at least 3\n" if $n < 3;
+	# web_if suppresses interactive canvas work, but in plotR::network and
+	# plotR::som it also skips building the plots themselves. Nothing here
+	# creates a Tk window -- the display step is stubbed below -- so it is
+	# turned off for the duration of the plot.
+	$::config_obj->web_if(0);
+
+	# The number of things being plotted: words for the word_* plots, codes
+	# for the coding ones. It drives the automatic cluster count.
+	my $n = $spec->{count} ? $spec->{count}->() : word_count();
+	die "khc: only $n items pass the filters; need at least 3\n" if $n < 3;
 
 	my %build = $spec->{build}->();
 	my $win   = $build{plotwin_name};
@@ -641,15 +847,33 @@ $CMD{plot} = sub {
 		*{"gui_window::r_plot::${win}::open"} = sub { return 1 };
 	}
 
-	no strict 'refs';
-	my $make = $spec->{module} . '::make_plot';
-	&$make(
-		%build,
+	my @common = (
 		font_size   => ( $OPT{font_size} // 1 ),
 		font_bold   => 0,
 		plot_size   => ( $OPT{size} // $spec->{size} // 'auto' ),
 		data_number => $n,
-	) or die "khc: the plot could not be produced\n";
+	);
+
+	if ( $spec->{class} ) {
+		# Engine-side builders (plotR::*) hand back the plot objects, and
+		# kh_r_plot::save re-renders one to a path of our choosing.
+		my $built = $spec->{class}->new( %build, @common )
+			or die "khc: the plot could not be produced\n";
+		my $plot = $built->{result_plots}
+			? $built->{result_plots}[ $OPT{plot_index} // 0 ]
+			: undef;
+		die "khc: the builder returned no plot\n" unless $plot;
+		$plot->save( $OPT{out} );
+		die "khc: nothing was written to $OPT{out}\n" unless -s $OPT{out};
+		emit({ written => $OPT{out}, kind => $kind, words => $n,
+		       bytes => -s $OPT{out} });
+		return;
+	} else {
+		no strict 'refs';
+		my $make = $spec->{module} . '::make_plot';
+		&$make( %build, @common )
+			or die "khc: the plot could not be produced\n";
+	}
 
 	my $src = $::config_obj->{cwd} . '/config/R-bridge/'
 	        . $::project_obj->dbname . '_' . $win . '_1.png';
@@ -688,7 +912,7 @@ GetOptionsFromArray(\@argv, \%OPT,
 	'lang=s', 'method=s', 'mode=s', 'json',
 	'rules=s', 'tani=s', 'var=s', 'out=s', 'type=s', 'ftype=s', 'sort=s', 'min_doc=i', 'num=s',
 	'kind=s', 'clusters=s', 'dist=s', 'clust=s', 'size=s', 'font_size=f',
-	'mds=s', 'dim=i', 'x=i', 'y=i', 'archive=s',
+	'mds=s', 'dim=i', 'x=i', 'y=i', 'archive=s', 'edges=i', 'edge_mode=s', 'edge_min=f', 'coef=s', 'plot_index=i', 'nodes=i', 'rlen1=i', 'rlen2=i',
 	'max=i', 'min=i', 'max_df=i', 'min_df=i',
 ) or die_usage('bad options');
 

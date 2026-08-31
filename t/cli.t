@@ -232,12 +232,21 @@ like( $ex, qr/"rows":[1-9]/, 'word list export reports rows' );
 #   group 2: R plots                                                 #
 #--------------------------------------------------------------------#
 
-for my $kind (qw(cls mds corresp)) {
+# Plots on one project share config/R-bridge and cannot run concurrently,
+# so these run one at a time.
+for my $kind (qw(cls mds corresp network som cod-cls cod-mds cod-corresp cod-netg)) {
     my $png  = "$TMP/khc_test_$kind.png";
     unlink $png if -e $png;
     my @args = ('plot', '--project', $PROJECT, '--kind', $kind,
-                '--out', $png, '--min', 50, '--json');
-    push @args, ('--tani', 'h5') if $kind eq 'corresp';   # sentences are too sparse
+                '--out', $png, '--json');
+    if ( $kind =~ /^cod-/ ) {
+        next unless -e $RULES;
+        push @args, ('--rules', $RULES);
+    } else {
+        push @args, ('--min', 50);
+    }
+    # Correspondence analysis needs denser units than single sentences.
+    push @args, ('--tani', 'h5') if $kind =~ /corresp/;
     my $out = khc(@args);
 
     like( $out, qr/"written"/, "$kind plot reports a file" );

@@ -59,6 +59,41 @@ Run it with:
 
     cd /khcoder/src && perl t/cli.t
 
+## What the CLI covers now
+
+`khc.pl` reaches 22 of the 44 menu-reachable targets. Beyond the project and
+text commands it has `vars`, `assoc`, `cod-freq`, `cod-jaccard`,
+`cod-crosstab`, `export`, `check`, `archive`, `restore`, and `plot` with nine
+kinds: `cls`, `mds`, `corresp`, `network`, `som`, `cod-cls`, `cod-mds`,
+`cod-corresp`, `cod-netg`.
+
+### Two parameters that look like hangs
+
+Both were mine, not the engine's, and both are worth knowing because the
+failure mode is a process that appears to hang for over an hour:
+
+- **`som`'s `n_nodes` is the side of a square grid**, so the map has `n_nodes²`
+  cells (`plotR/som.pm:217`). The GUI defaults to 20 — 400 cells — under the
+  label 「1辺のノード数」, *nodes per side* (`gui_widget/r_som.pm:12`). Passing
+  100 asks for 10,000 cells.
+- **The network plot's nodes are the matrix rows.** `cod_netg.pm:602` puts the
+  codes in rows before plotting; leaving the documents there asks for a graph
+  over all 5,064 of them.
+
+Neither is an infinite loop. `Statistics::R::Bridge::pipe::send` bounds its
+wait at `$xx > 10000` half-second ticks (`pipe.pm:197`), about 83 minutes, and
+the output check at 20 seconds (`pipe.pm:232`); both then give up with
+"Could not send the command to R!". A front end should impose its own timeout
+rather than inherit that one.
+
+### Plots cannot run concurrently on one project
+
+`kh_r_plot` names its working files by project inside `config/R-bridge/`, so
+two plot commands against the same project collide and both stall until one is
+killed. This is the concrete form of the package-global state noted under
+Risks: an HTTP layer must serialise plot requests per project. It also means a
+test suite has to run them one at a time.
+
 ## What the CLI exposed
 
 Three things worth knowing before designing the API, all found by building it:
@@ -129,6 +164,13 @@ effort concentrates and is worth reassessing once 1–3 are in hand.
   without auditing that state first.
 - **Long text in the browser.** `doc_search` can return thousands of documents;
   the engine already pages, and the API should not undo that.
+- **`web_if` does more than skip the canvas.** In `plotR::network` and
+  `plotR::som` the branch that builds the plots at all is guarded by
+  `web_if == 0`, so the flag has to be turned *off* while a plot runs even
+  though no window is created. Worth checking before relying on it elsewhere.
+- **The data check silently drops characters** that EUC-JP cannot represent,
+  per the author's own notes. That is data loss, and a web front end that
+  accepts arbitrary uploads should warn about it or avoid the auto-fix path.
 
 ## Not in scope
 
