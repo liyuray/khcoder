@@ -312,6 +312,11 @@ unlink $hf if -e $hf;
 my $hd = khc('headings', '--project', $PROJECT, '--out', $hf, '--json');
 like( $hd, qr/"bytes":[1-9]/, 'headings are exported' );
 
+my $tp = khc('topics', '--project', $PROJECT, '--topics', 3, '--limit', 4,
+             '--min', 40, '--json');
+like( $tp, qr/"topic":1/,  'topic model returns numbered topics' );
+like( $tp, qr/"word":"/,   'each topic lists its strongest words' );
+
 #--------------------------------------------------------------------#
 
 print "\n1..$ran\n";

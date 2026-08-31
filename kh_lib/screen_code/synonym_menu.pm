@@ -107,47 +107,51 @@ sub add_menu_exec_plugin{
 #バックアップテーブルが存在しない、もしくは作成以降に前処理が行われたか確認する
 sub checkDoPreprocess{
 	my $dbName = $::project_obj->dbname;
-	return -1 unless mysql_exec->table_exists("$dbName.genkei"); #処理不能エラー
+	return -1 unless mysql_exec->table_exists("genkei"); #処理不能エラー
 	
-	my $check = mysql_exec->select("
-		SELECT Create_time FROM information_schema.tables WHERE TABLE_SCHEMA = '$dbName' AND TABLE_NAME LIKE 'genkei_yomigana' ORDER BY Create_time DESC
-	",1)->hundle;
-	my $i = $check->fetch;
-	return 1 unless $i; #バックアップテーブルが存在しないため作成の必要あり
-	my $careta_genkei = $i->[0];
-	
-	$check = mysql_exec->select("
-		SELECT Create_time FROM information_schema.tables WHERE TABLE_SCHEMA = '$dbName' AND TABLE_NAME LIKE 'hinshi'
-	",1)->hundle;
-	$i = $check->fetch;
-	return 1 unless $i; #比較対象がない(この状況は起きない想定)
-	my $do_prep = $i->[0];
-	
-	print "前処理実行日時：$do_prep バックアップ作成日時：$careta_genkei \n";
-	if ($do_prep gt $careta_genkei ){
-		return 1;
-	} else {
-		return 0;
-	}
+	# SQLite has no per-table creation time. The question is only whether
+	# pre-processing has been re-run since the backup was made, so that is
+	# recorded in status_char when the backup is built, and compared here.
+	return 1 unless mysql_exec->table_exists('genkei_yomigana');
+
+	my $h = mysql_exec->select(
+		"SELECT status FROM status_char WHERE name = 'synonym_backup_morpho'", 0
+	)->hundle;
+	my $marked = $h ? $h->fetch : undef;
+	$marked = ( $marked && defined $marked->[0] ) ? $marked->[0] : '';
+
+	return 1 unless length $marked;
+	return ( $marked eq &_morpho_stamp ) ? 0 : 1;
+}
+
+# The modification time of the morphological analysis output, which changes
+# whenever pre-processing is re-run.
+sub _morpho_stamp {
+	my $f = eval { $::project_obj->file_MorphoOut };
+	return '' unless $f && -e $f;
+	return ( stat($f) )[9];
 }
 
 #バックアップテーブルを作成する
 sub create_backup_table{
 	my $dbName = $::project_obj->dbname;
-	if (mysql_exec->table_exists("$dbName.genkei_backup")) {
-		mysql_exec->do("DROP TABLE $dbName.genkei_backup",1);
+	if (mysql_exec->table_exists("genkei_backup")) {
+		mysql_exec->do("DROP TABLE genkei_backup",1);
 	}
-	mysql_exec->do("CREATE TABLE $dbName.genkei_backup LIKE $dbName.genkei",1);
-	mysql_exec->do("INSERT INTO $dbName.genkei_backup SELECT * FROM $dbName.genkei",1);
+	mysql_exec->do("DELETE FROM status_char WHERE name = 'synonym_backup_morpho'",0);
+	mysql_exec->do("INSERT INTO status_char (name, status) VALUES "
+		."('synonym_backup_morpho', ".mysql_exec->quote(&_morpho_stamp).")",0);
+	mysql_exec->do("CREATE TABLE genkei_backup LIKE genkei",1);
+	mysql_exec->do("INSERT INTO genkei_backup SELECT * FROM genkei",1);
 	
-	if (mysql_exec->table_exists("$dbName.hyoso_backup")) {
-		mysql_exec->do("DROP TABLE $dbName.hyoso_backup",1);
+	if (mysql_exec->table_exists("hyoso_backup")) {
+		mysql_exec->do("DROP TABLE hyoso_backup",1);
 	}
-	mysql_exec->do("CREATE TABLE $dbName.hyoso_backup LIKE $dbName.hyoso",1);
-	mysql_exec->do("INSERT INTO $dbName.hyoso_backup SELECT * FROM $dbName.hyoso",1);
+	mysql_exec->do("CREATE TABLE hyoso_backup LIKE hyoso",1);
+	mysql_exec->do("INSERT INTO hyoso_backup SELECT * FROM hyoso",1);
 	
-	if (mysql_exec->table_exists("$dbName.genkei_yomigana")) {
-		mysql_exec->do("DROP TABLE $dbName.genkei_yomigana",1);
+	if (mysql_exec->table_exists("genkei_yomigana")) {
+		mysql_exec->do("DROP TABLE genkei_yomigana",1);
 	}
 	my $t = mysql_exec->select('
 		SELECT genkei.name, genkei.id

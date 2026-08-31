@@ -119,12 +119,22 @@ sub _jstr {
 	return '"' . $s . '"';
 }
 
+# Render one cell, flattening a nested list or record rather than printing a
+# reference.
+sub _flat {
+	my $v = shift;
+	return '' unless defined $v;
+	if ( ref $v eq 'ARRAY' ) { return join(' ', map { _flat($_) } @$v) }
+	if ( ref $v eq 'HASH'  ) { return join(':', map { _flat($v->{$_}) } sort keys %$v) }
+	return $v;
+}
+
 sub _plain {
 	my $d = shift;
 	if ( ref $d eq 'ARRAY' ) {
 		foreach my $r (@$d) {
-			print ref $r eq 'ARRAY' ? join("\t", map { defined $_ ? $_ : '' } @$r) . "\n"
-			    : ref $r eq 'HASH'  ? join("\t", map { "$_=" . (defined $r->{$_} ? $r->{$_} : '') } sort keys %$r) . "\n"
+			print ref $r eq 'ARRAY' ? join("\t", map { _flat($_) } @$r) . "\n"
+			    : ref $r eq 'HASH'  ? join("\t", map { "$_=" . _flat($r->{$_}) } sort keys %$r) . "\n"
 			    :                     "$r\n";
 		}
 	} elsif ( ref $d eq 'HASH' ) {
@@ -165,6 +175,7 @@ usage: khc.pl <command> [options]
                                             extract the text a rule matches
   headings --project NAME --out FILE [--tani h5]   headings for a unit
   settings                                  current configuration
+  topics --project NAME [--topics K] [--limit N]   fit an LDA topic model
   archive --project NAME --out FILE.khc          export the whole project
   restore --archive FILE.khc --target FILE       import one back
   stats  --project NAME         the figures shown on the main window
@@ -1036,6 +1047,68 @@ $CMD{settings} = sub {
 	}
 	$out{sqlite_version} = mysql_exec->version_number // '';
 	emit(\%out);
+};
+
+$CMD{topics} = sub {
+	open_project( $OPT{project} );
+	need_r();
+	$::config_obj->web_if(0);
+
+	my $k = $OPT{topics} // 5;
+	my $pos = used_pos();
+
+	# not_word_but_id keeps the matrix columns addressable by word id, which is
+	# how topic_fitting maps terms back to names.
+	my $data = mysql_crossout::r_com->new(
+		tani     => $OPT{tani}, tani2 => $OPT{tani},
+		hinshi   => [ sort { $a <=> $b } keys %$pos ],
+		max      => ( $OPT{max}    // 0 ), min    => ( $OPT{min}    // 0 ),
+		max_df   => ( $OPT{max_df} // 0 ), min_df => ( $OPT{min_df} // 0 ),
+		rownames => 0, sampling => 0,
+		not_word_but_id => 1,
+	);
+	my $r = $data->run;
+	my %names = %{ $data->{wName} || {} };
+
+	my $terms = $::config_obj->{cwd} . '/config/R-bridge/'
+	          . $::project_obj->dbname . '_topicTM';
+	unlink $terms if -e $terms;
+
+	$r .= "\n# END: DATA\n";
+	$r .= "\ndtm <- d\nrownames(dtm) <- 1:nrow(dtm)\n";
+	$r .= "dtm <- dtm[rowSums(dtm) > 0,]\n";
+	$r .= "library(topicmodels)\n";
+	$r .= "result_lda <- topicmodels::LDA(dtm, k = $k, method = \"Gibbs\","
+	    . " control = list(seed = 1234567, burnin = 1000))\n";
+	$r .= 'write.table(posterior(result_lda)$terms, file = "'
+	    . $::config_obj->uni_path($terms)
+	    . '", fileEncoding="UTF-8", sep="\t", quote=F, col.names=NA )' . "\n";
+
+	$::config_obj->{R}->send($r);
+	my $msg = $::config_obj->{R}->read;
+	die "khc: fitting the topic model failed\n$msg\n" unless -s $terms;
+
+	# posterior()$terms is topics x terms; report the strongest words per topic.
+	open(my $fh, '<:encoding(UTF-8)', $terms) or die "khc: cannot read $terms\n";
+	my $head = <$fh>;
+	chomp $head;
+	my @ids = split /\t/, $head;
+	shift @ids;                       # leading empty corner cell
+	my @out;
+	while ( my $line = <$fh> ) {
+		chomp $line;
+		my @f = split /\t/, $line;
+		my $topic = shift @f;
+		my @rank = sort { $f[$b] <=> $f[$a] } 0 .. $#f;
+		splice(@rank, $OPT{limit} > 20 ? 20 : $OPT{limit});
+		push @out, {
+			topic => $topic + 0,
+			words => [ map { { word => ( $names{ $ids[$_] } // $ids[$_] ),
+			                   p    => sprintf('%.5f', $f[$_]) } } @rank ],
+		};
+	}
+	close $fh;
+	emit(\@out);
 };
 
 $CMD{plot} = sub {

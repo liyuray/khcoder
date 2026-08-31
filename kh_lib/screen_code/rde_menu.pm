@@ -35,10 +35,10 @@ sub add_menu{
 					return 0;
 				}
 				
-				my $outvarhundle = mysql_exec->select("SELECT tab, col FROM $dbName.outvar ORDER BY CHAR_LENGTH(col), col",1)->hundle;
+				my $outvarhundle = mysql_exec->select("SELECT tab, col FROM outvar ORDER BY CHAR_LENGTH(col), col",1)->hundle;
 				if ($outvarhundle->rows > 0) {
 					#$latestTableNum = $outvarhundle->fetch->[0];
-					#my $SQL = "SELECT * FROM $dbName.$latestTableNum ORDER BY id INTO OUTFILE '$sql_file' FIELDS TERMINATED BY ',' ENCLOSED BY '\"' ESCAPED BY '\"' LINES TERMINATED BY '\r\n'";
+					#my $SQL = "SELECT * FROM $latestTableNum ORDER BY id INTO OUTFILE '$sql_file' FIELDS TERMINATED BY ',' ENCLOSED BY '\"' ESCAPED BY '\"' LINES TERMINATED BY '\r\n'";
 					#mysql_exec->do($SQL,1);
 					
 					my ($select_col, $first_table, $join_str, $on_str , @table_num_list);
@@ -101,7 +101,7 @@ sub add_menu{
 					$csv_file = $::config_obj->cwd."/screen/temp/vardata.csv";
 					unlink $csv_file if -f $csv_file;
 					open($DATAFILE, "+>>", $csv_file);
-					my $h = mysql_exec->select("SELECT name FROM $dbName.outvar ORDER BY CHAR_LENGTH(col), col",1)->hundle;
+					my $h = mysql_exec->select("SELECT name FROM outvar ORDER BY CHAR_LENGTH(col), col",1)->hundle;
 					while (my $i = $h->fetch){
 						print $DATAFILE encode('utf8',"$i->[0],");
 						$i++;
@@ -133,16 +133,16 @@ sub add_menu{
 				if (length($latestTableNum) == 0 || $system_err != 0) {
 					#エラーのため適用せず終了
 				} elsif ($plugin_rtn == 256) {
-					if (mysql_exec->table_exists("$dbName.outvarcopy")) {
-						mysql_exec->drop_table("$dbName.outvarcopy");
+					if (mysql_exec->table_exists("outvarcopy")) {
+						mysql_exec->drop_table("outvarcopy");
 					}
-					mysql_exec->do("CREATE TABLE $dbName.outvarcopy LIKE $dbName.outvar",1);
-					mysql_exec->do("INSERT INTO $dbName.outvarcopy SELECT * FROM $dbName.outvar",1);
-					mysql_exec->do("DELETE FROM $dbName.outvar",1);
-					if (mysql_exec->table_exists("$dbName.${latestTableNum}copy")) {
-						mysql_exec->drop_table("$dbName.${latestTableNum}copy");
+					mysql_exec->do("CREATE TABLE outvarcopy LIKE outvar",1);
+					mysql_exec->do("INSERT INTO outvarcopy SELECT * FROM outvar",1);
+					mysql_exec->do("DELETE FROM outvar",1);
+					if (mysql_exec->table_exists("${latestTableNum}copy")) {
+						mysql_exec->drop_table("${latestTableNum}copy");
 					}
-					mysql_exec->do("RENAME TABLE $dbName.$latestTableNum TO $dbName.${latestTableNum}copy",1);
+					mysql_exec->do("RENAME TABLE $latestTableNum TO ${latestTableNum}copy",1);
 					#my $SQLres = mysql_outvar::read::tab->new(
 					#	file        => $csv_file,
 					#	tani        => 'h5',
@@ -161,18 +161,18 @@ sub add_menu{
 							type   => 'msg',
 							msg    => kh_msg->get('err_edit'),
 						);
-						if (mysql_exec->table_exists("$dbName.outvar")) {
-							mysql_exec->do("DELETE FROM $dbName.outvar",1);
+						if (mysql_exec->table_exists("outvar")) {
+							mysql_exec->do("DELETE FROM outvar",1);
 						}
-						if (mysql_exec->table_exists("$dbName.$latestTableNum")) {
-							mysql_exec->drop_table("$dbName.$latestTableNum");
+						if (mysql_exec->table_exists("$latestTableNum")) {
+							mysql_exec->drop_table("$latestTableNum");
 						}
-						mysql_exec->do("INSERT INTO $dbName.outvar SELECT * FROM $dbName.outvarcopy",1);
-						mysql_exec->do("DROP TABLE $dbName.outvarcopy",1);
-						mysql_exec->do("RENAME TABLE $dbName.${latestTableNum}copy TO $dbName.$latestTableNum",1);
+						mysql_exec->do("INSERT INTO outvar SELECT * FROM outvarcopy",1);
+						mysql_exec->do("DROP TABLE outvarcopy",1);
+						mysql_exec->do("RENAME TABLE ${latestTableNum}copy TO $latestTableNum",1);
 					} else {
-						mysql_exec->drop_table("$dbName.outvarcopy");
-						mysql_exec->drop_table("$dbName.${latestTableNum}copy");
+						mysql_exec->drop_table("outvarcopy");
+						mysql_exec->drop_table("${latestTableNum}copy");
 						
 						#プロジェクトを閉じて開く(前処理も必要か)
 						my $cu_project;
